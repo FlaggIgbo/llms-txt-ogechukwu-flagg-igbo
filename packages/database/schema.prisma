@@ -1,0 +1,29 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum EntryStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model SiteEntry {
+  id                        String      @id @default(uuid())
+  website_url               String      @unique
+  website_short_description String      @default("")
+  is_updated_latest         Boolean     @default(false)
+  llms_txt_storage          String?
+  llms_full_txt_storage     String?
+  status                    EntryStatus @default(PENDING)
+  created_at                DateTime    @default(now())
+  updated_at                DateTime    @updatedAt
+
+  @@map("site_entries")
+}
