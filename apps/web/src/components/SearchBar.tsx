@@ -5,6 +5,14 @@ export interface SearchBarProps {
   onChange: (value: string) => void;
 }
 
-export const SearchBar: React.FC<SearchBarProps> = (_props) => {
-  return null;
+export const SearchBar: React.FC<SearchBarProps> = ({ value, onChange }) => {
+  return (
+    <input
+      type="search"
+      className="search-input"
+      placeholder="Search directory..."
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
 };

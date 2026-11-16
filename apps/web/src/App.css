@@ -1,0 +1,240 @@
+:root {
+  --color-text-primary: #24292f;
+  --color-text-secondary: #57606a;
+  --color-link: #0969da;
+  --color-border: #d0d7de;
+  --color-border-subtle: #eaecef;
+  --color-bg-subtle: #f6f8fa;
+  --color-bg-hover: #f8fafc;
+  --color-bg-card: #ffffff;
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-family);
+  color: var(--color-text-primary);
+  background-color: #ffffff;
+  -webkit-font-smoothing: antialiased;
+}
+
+.directory-container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem;
+}
+
+.directory-header {
+  margin-bottom: 2rem;
+}
+
+.directory-title {
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem 0;
+}
+
+.directory-subtitle {
+  color: var(--color-text-secondary);
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.directory-code {
+  background-color: var(--color-bg-subtle);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+.search-section {
+  margin-bottom: 1.5rem;
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.search-input:focus {
+  border-color: var(--color-link);
+  box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.15);
+}
+
+.error-banner {
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  background-color: #fff8c5;
+  border: 1px solid #d4a72c;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  color: #4d3800;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.retry-button {
+  background-color: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: background-color 0.15s ease;
+}
+
+.retry-button:hover {
+  background-color: #e8ecf0;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  background-color: var(--color-bg-card);
+}
+
+.directory-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.95rem;
+}
+
+.table-head-row {
+  background-color: var(--color-bg-subtle);
+  border-bottom: 2px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.th-name {
+  padding: 12px 16px;
+  font-weight: 600;
+  width: 22%;
+}
+
+.th-desc {
+  padding: 12px 16px;
+  font-weight: 600;
+  width: 40%;
+}
+
+.th-llm-txt {
+  padding: 12px 16px;
+  font-weight: 600;
+  width: 23%;
+}
+
+.th-updated {
+  padding: 12px 16px;
+  font-weight: 600;
+  width: 15%;
+}
+
+.table-empty-cell {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.table-row {
+  border-bottom: 1px solid var(--color-border-subtle);
+  transition: background-color 0.15s ease;
+}
+
+.table-row:hover {
+  background-color: var(--color-bg-hover);
+}
+
+.cell-name {
+  padding: 12px 16px;
+  vertical-align: top;
+  font-weight: 600;
+}
+
+.site-link {
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.site-link:hover {
+  text-decoration: underline;
+}
+
+.cell-desc {
+  padding: 12px 16px;
+  vertical-align: top;
+  color: #424a53;
+  line-height: 1.5;
+}
+
+.cell-llm-txt {
+  padding: 12px 16px;
+  vertical-align: top;
+}
+
+.llm-txt-link {
+  color: var(--color-link);
+  text-decoration: none;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  word-break: break-all;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.llm-txt-link:hover {
+  text-decoration: underline;
+}
+
+.external-arrow {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+.empty-dash {
+  color: #8c959f;
+}
+
+.cell-updated {
+  padding: 12px 16px;
+  vertical-align: top;
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.directory-footer {
+  margin-top: 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+}
+
+.refresh-button {
+  background: none;
+  border: none;
+  color: var(--color-link);
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
+.refresh-button:hover {
+  text-decoration: underline;
+}
+

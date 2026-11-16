@@ -1,0 +1,13 @@
+#!/bin/sh
+echo "🔍 Running pre-push checks (npm run lint)..."
+npm run lint
+
+STATUS=$?
+if [ $STATUS -ne 0 ]; then
+  echo "❌ Error: 'npm run lint' failed. Push rejected."
+  exit $STATUS
+fi
+
+echo "✅ Pre-push checks passed."
+exit 0
+
