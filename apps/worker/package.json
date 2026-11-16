@@ -7,14 +7,21 @@
     "dev": "node --import tsx --watch src/index.ts",
     "start": "node dist/index.js",
     "build": "tsc --noEmit",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test"
   },
   "dependencies": {
+    "@google/genai": "^3.3.0",
     "@llmstxt/database": "*",
     "@llmstxt/queue": "*",
-    "@llmstxt/shared-types": "*"
+    "@llmstxt/shared-types": "*",
+    "@mozilla/readability": "^0.6.0",
+    "jsdom": "^29.1.1",
+    "node-html-markdown": "^2.0.0",
+    "playwright": "^1.65.1"
   },
   "devDependencies": {
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^22.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
