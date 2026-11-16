@@ -39,13 +39,13 @@ services:
       - key: LOCAL_STORAGE_DIR
         value: /tmp/storage
 
-  # 3. Scraping, LLMs.txt Generation & Cadence Worker
+  # 3. Scraping, LLMs.txt Generation & Cadence Worker (Docker container with pre-installed Chromium)
   - type: worker
     name: llmstxt-worker
-    env: node
+    runtime: docker
     plan: starter
-    buildCommand: npm install && npx playwright install --with-deps chromium
-    startCommand: npx tsx apps/worker/src/index.ts
+    dockerfilePath: ./apps/worker/Dockerfile
+    dockerContext: .
     envVars:
       - key: DATABASE_URL
         fromDatabase:

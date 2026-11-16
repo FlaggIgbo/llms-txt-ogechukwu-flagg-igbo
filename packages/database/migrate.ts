@@ -44,3 +44,4 @@ export async function runMigrations(): Promise<void> {
 if (import.meta.url === `file://${process.argv[1]}`) {
   runMigrations();
 }
+
