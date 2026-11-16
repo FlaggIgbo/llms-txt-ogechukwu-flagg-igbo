@@ -2,11 +2,13 @@ export type EntryStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
 export interface SiteEntry {
   id: string;
+  website_name?: string;
   website_url: string;
   website_short_description: string;
   is_updated_latest: boolean;
   llms_txt_storage: string | null;
   llms_full_txt_storage: string | null;
+  llm_txt?: string | null;
   status: EntryStatus;
   created_at: string;
   updated_at: string;

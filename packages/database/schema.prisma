@@ -16,6 +16,7 @@ enum EntryStatus {
 
 model SiteEntry {
   id                        String      @id @default(uuid())
+  website_name              String      @default("")
   website_url               String      @unique
   website_short_description String      @default("")
   is_updated_latest         Boolean     @default(false)
