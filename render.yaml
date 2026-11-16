@@ -1,7 +1,6 @@
 databases:
   - name: llmstxt-postgres
     databaseName: llmstxt_directory
-    user: postgres
     plan: free
 
 services:
@@ -71,3 +70,4 @@ services:
         fromDatabase:
           name: llmstxt-postgres
           property: connectionString
+
