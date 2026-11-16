@@ -64,8 +64,25 @@ export const MOCK_SEED_ENTRIES: SiteEntry[] = [
 ];
 
 const env = (import.meta as any).env || {};
-const rawApiBase = env.VITE_API_URL || env.VITE_API_BASE_URL || 'http://localhost:4000';
-const API_BASE = rawApiBase.startsWith('http') ? rawApiBase : `https://${rawApiBase}`;
+const rawApiBase = String(env.VITE_API_URL || env.VITE_API_BASE_URL || 'http://localhost:4000').trim();
+
+// Format API base URL, converting Render internal hostnames (e.g. "llmstxt-api-5yok") to full public URLs.
+export function resolveApiBaseUrl(raw: string): string {
+  let base = (raw || '').trim();
+  if (!base || base === 'undefined' || base === 'null') {
+    return 'http://localhost:4000';
+  }
+  if (!base.startsWith('http://') && !base.startsWith('https://')) {
+    if (!base.includes('.') && !base.includes('localhost')) {
+      base = `https://${base}.onrender.com`;
+    } else {
+      base = `https://${base}`;
+    }
+  }
+  return base.replace(/\/+$/, '');
+}
+
+const API_BASE = resolveApiBaseUrl(rawApiBase);
 
 // Check if an entry matches the search text.
 export function matchesSearch(item: SiteEntry, query: string): boolean {
