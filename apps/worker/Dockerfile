@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 WORKDIR /app
 
@@ -9,7 +9,7 @@ COPY packages ./packages
 COPY apps/worker ./apps/worker
 
 # Install npm dependencies
-RUN npm install
+RUN npm install --ignore-scripts
 
 # Install Playwright Chromium with system dependencies (runs as root inside container)
 RUN npx playwright install --with-deps chromium
