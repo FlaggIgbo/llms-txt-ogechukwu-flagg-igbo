@@ -1,25 +1,41 @@
 import React from 'react';
 import type { SiteEntry } from '@llmstxt/shared-types';
 
+// Props for the directory table.
 export interface DirectoryTableProps {
   entries: SiteEntry[];
   loading?: boolean;
   error?: string | null;
 }
 
+// Remove trailing slashes from a URL.
+function trimTrailingSlashes(url: string): string {
+  let clean = url;
+  while (clean.endsWith('/')) {
+    clean = clean.slice(0, -1);
+  }
+  return clean;
+}
+
+// Get the llms.txt URL for an entry.
 function resolveLlmTxtUrl(entry: SiteEntry): string {
   if (entry.llm_txt) {
     return entry.llm_txt;
   }
-  if (entry.llms_txt_storage && (entry.llms_txt_storage.startsWith('http://') || entry.llms_txt_storage.startsWith('https://'))) {
-    return entry.llms_txt_storage;
+
+  const storageUrl = entry.llms_txt_storage || '';
+  if (storageUrl.startsWith('http://') || storageUrl.startsWith('https://')) {
+    return storageUrl;
   }
+
   if (entry.website_url) {
-    return `${entry.website_url.replace(/\/+$/, '')}/llms.txt`;
+    return `${trimTrailingSlashes(entry.website_url)}/llms.txt`;
   }
+
   return '';
 }
 
+// Format an ISO date string into a readable date.
 function formatDate(isoString: string): string {
   if (!isoString) return '—';
   try {
@@ -35,11 +51,91 @@ function formatDate(isoString: string): string {
   }
 }
 
-export const DirectoryTable: React.FC<DirectoryTableProps> = ({
+// Render a single table row.
+function renderEntryRow(entry: SiteEntry) {
+  const llmTxtUrl = resolveLlmTxtUrl(entry);
+  const displayName = entry.website_name || entry.website_url || '—';
+
+  return (
+    <tr key={entry.id} className="table-row">
+      {/* Website name and link */}
+      <td className="cell-name">
+        {entry.website_url ? (
+          <a
+            href={entry.website_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="site-link"
+          >
+            {displayName}
+          </a>
+        ) : (
+          displayName
+        )}
+      </td>
+
+      {/* Short description */}
+      <td className="cell-desc">
+        {entry.website_short_description || '—'}
+      </td>
+
+      {/* Link to llms.txt */}
+      <td className="cell-llm-txt">
+        {llmTxtUrl ? (
+          <a
+            href={llmTxtUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="llm-txt-link"
+          >
+            {llmTxtUrl}
+            <span className="external-arrow">↗</span>
+          </a>
+        ) : (
+          <span className="empty-dash">—</span>
+        )}
+      </td>
+
+      {/* Last updated date */}
+      <td className="cell-updated">
+        {formatDate(entry.updated_at)}
+      </td>
+    </tr>
+  );
+}
+
+// Table showing all matching websites.
+export function DirectoryTable({
   entries,
   loading = false,
   error = null,
-}) => {
+}: DirectoryTableProps) {
+  // Decide what to show in the table body.
+  function renderRows() {
+    if (loading && entries.length === 0) {
+      return (
+        <tr>
+          <td colSpan={4} className="table-empty-cell">
+            Loading site entries...
+          </td>
+        </tr>
+      );
+    }
+
+    if (entries.length === 0) {
+      if (error) return null;
+      return (
+        <tr>
+          <td colSpan={4} className="table-empty-cell">
+            No results
+          </td>
+        </tr>
+      );
+    }
+
+    return entries.map(renderEntryRow);
+  }
+
   return (
     <div className="table-wrapper">
       <table className="directory-table">
@@ -51,75 +147,8 @@ export const DirectoryTable: React.FC<DirectoryTableProps> = ({
             <th className="th-updated">updated_at</th>
           </tr>
         </thead>
-        <tbody>
-          {loading && entries.length === 0 ? (
-            <tr>
-              <td colSpan={4} className="table-empty-cell">
-                Loading site entries...
-              </td>
-            </tr>
-          ) : entries.length === 0 ? (
-            error ? null : (
-              <tr>
-                <td colSpan={4} className="table-empty-cell">
-                  No results
-                </td>
-              </tr>
-            )
-          ) : (
-            entries.map((entry) => {
-              const llmTxtUrl = resolveLlmTxtUrl(entry);
-              return (
-                <tr key={entry.id} className="table-row">
-                  {/* website_name */}
-                  <td className="cell-name">
-                    {entry.website_url ? (
-                      <a
-                        href={entry.website_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="site-link"
-                      >
-                        {entry.website_name || entry.website_url}
-                      </a>
-                    ) : (
-                      entry.website_name || '—'
-                    )}
-                  </td>
-
-                  {/* website_short_description */}
-                  <td className="cell-desc">
-                    {entry.website_short_description || '—'}
-                  </td>
-
-                  {/* llm_txt (url that would open the text file) */}
-                  <td className="cell-llm-txt">
-                    {llmTxtUrl ? (
-                      <a
-                        href={llmTxtUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="llm-txt-link"
-                      >
-                        {llmTxtUrl}
-                        <span className="external-arrow">↗</span>
-                      </a>
-                    ) : (
-                      <span className="empty-dash">—</span>
-                    )}
-                  </td>
-
-                  {/* updated_at */}
-                  <td className="cell-updated">
-                    {formatDate(entry.updated_at)}
-                  </td>
-                </tr>
-              );
-            })
-          )}
-        </tbody>
+        <tbody>{renderRows()}</tbody>
       </table>
     </div>
   );
-};
-
+}

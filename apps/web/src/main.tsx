@@ -3,17 +3,21 @@ import { createRoot } from 'react-dom/client';
 import * as Sentry from '@sentry/react';
 import { App } from './App.js';
 
-const isDev = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV ?? false;
+// Read Vite environment variables.
+const env = (import.meta as any).env || {};
+const isDev = Boolean(env.DEV);
 const SENTRY_DSN =
-  (import.meta as unknown as { env?: { VITE_SENTRY_DSN?: string } }).env?.VITE_SENTRY_DSN ||
+  env.VITE_SENTRY_DSN ||
   'https://c31c0dc7176c8888ea11bca0a9523173@o4512439839096833.ingest.us.sentry.io/4512439858298880';
 
+// Initialize Sentry error tracking.
 Sentry.init({
   dsn: SENTRY_DSN,
-  environment: (import.meta as unknown as { env?: { MODE?: string } }).env?.MODE || 'production',
+  environment: env.MODE || 'production',
   tracesSampleRate: isDev ? 1.0 : 0.1,
 });
 
+// Mount the React app.
 const rootEl = document.getElementById('root');
 if (rootEl) {
   createRoot(rootEl).render(

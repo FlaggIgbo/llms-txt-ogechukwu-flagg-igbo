@@ -1,5 +1,7 @@
+// Possible states of a site entry.
 export type EntryStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
+// A website record in the directory.
 export interface SiteEntry {
   id: string;
   website_name?: string;
@@ -14,28 +16,33 @@ export interface SiteEntry {
   updated_at: string;
 }
 
+// Input for adding a new website.
 export interface CreateSiteEntryRequest {
   website_url: string;
   website_short_description?: string;
 }
 
+// Parameters for searching entries.
 export interface SearchQuery {
   q: string;
   limit?: number;
   offset?: number;
 }
 
+// Paginated search response.
 export interface SearchResult {
   entries: SiteEntry[];
   total: number;
 }
 
+// Data sent to the background worker queue.
 export interface GenerateJobPayload {
   entryId: string;
   websiteUrl: string;
   isScheduledUpdate?: boolean;
 }
 
+// Record of a scheduled site check.
 export interface UpdateLog {
   id: string;
   entry_id: string;

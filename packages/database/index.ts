@@ -1,9 +1,11 @@
 import pg from 'pg';
 import type { SiteEntry, CreateSiteEntryRequest } from '@llmstxt/shared-types';
 
+// Database connection URL.
 const connectionString =
   process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/llmstxt_directory';
 
+// Default rows for local development and testing.
 export const MOCK_SEED_ENTRIES: SiteEntry[] = [
   {
     id: '00000000-0000-0000-0000-000000000001',
@@ -55,19 +57,56 @@ export const MOCK_SEED_ENTRIES: SiteEntry[] = [
   },
 ];
 
+// Remove trailing slashes from a URL.
+function trimTrailingSlashes(url: string): string {
+  let clean = url;
+  while (clean.endsWith('/')) {
+    clean = clean.slice(0, -1);
+  }
+  return clean;
+}
+
+// Convert a raw DB row into a SiteEntry.
 function formatRow(row: any): SiteEntry {
+  const createdAt = row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString();
+  const updatedAt = row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString();
+
+  let llmTxt: string | null = null;
+  if (row.llm_txt) {
+    llmTxt = row.llm_txt;
+  } else if (row.llms_txt_storage) {
+    llmTxt = row.llms_txt_storage;
+  } else if (row.website_url) {
+    llmTxt = `${trimTrailingSlashes(String(row.website_url))}/llms.txt`;
+  }
+
   return {
     ...row,
-    created_at: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
-    updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
-    llm_txt: row.llm_txt ?? row.llms_txt_storage ?? (row.website_url ? `${row.website_url.replace(/\/+$/, '')}/llms.txt` : null),
+    created_at: createdAt,
+    updated_at: updatedAt,
+    llm_txt: llmTxt,
   };
 }
 
+// Check if running in local dev mode.
+function isDevMode(): boolean {
+  return process.env.NODE_ENV !== 'production' || connectionString.includes('localhost');
+}
+
+// Check if an entry contains the search text.
+function entryMatchesQuery(entry: SiteEntry, lowerQuery: string): boolean {
+  const name = (entry.website_name || '').toLowerCase();
+  const desc = (entry.website_short_description || '').toLowerCase();
+  const url = (entry.website_url || '').toLowerCase();
+  return name.includes(lowerQuery) || desc.includes(lowerQuery) || url.includes(lowerQuery);
+}
+
+// Handles all PostgreSQL queries.
 export class DatabaseClient {
   private pool: pg.Pool | null = null;
   private hasEnsuredSeed = false;
 
+  // Create or reuse the DB connection pool.
   private getPool(): pg.Pool {
     if (!this.pool) {
       this.pool = new pg.Pool({ connectionString });
@@ -75,6 +114,7 @@ export class DatabaseClient {
     return this.pool;
   }
 
+  // Insert seed rows if not already done.
   async ensureDevelopmentSeed(): Promise<void> {
     if (this.hasEnsuredSeed) return;
     try {
@@ -111,28 +151,30 @@ export class DatabaseClient {
       this.hasEnsuredSeed = true;
     } catch (err) {
       if (process.env.NODE_ENV !== 'production') {
-        console.warn('[DatabaseClient] Seed upsert skipped:', err instanceof Error ? err.message : err);
+        const msg = err instanceof Error ? err.message : err;
+        console.warn('[DatabaseClient] Seed upsert skipped:', msg);
       }
     }
   }
 
+  // Get all entries sorted by newest update.
   async listEntries(): Promise<SiteEntry[]> {
-    const isDev = process.env.NODE_ENV !== 'production' || connectionString.includes('localhost');
+    const isDev = isDevMode();
     if (isDev && !this.hasEnsuredSeed) {
       await this.ensureDevelopmentSeed();
     }
 
+    const selectAllSql =
+      'SELECT id, website_name, website_url, website_short_description, is_updated_latest, llms_txt_storage, llms_full_txt_storage, status, created_at, updated_at FROM site_entries ORDER BY updated_at DESC';
+
     try {
       const pool = this.getPool();
-      const result = await pool.query<SiteEntry>(
-        'SELECT id, website_name, website_url, website_short_description, is_updated_latest, llms_txt_storage, llms_full_txt_storage, status, created_at, updated_at FROM site_entries ORDER BY updated_at DESC'
-      );
+      const result = await pool.query<SiteEntry>(selectAllSql);
 
+      // Seed and retry if table is empty in dev.
       if (result.rows.length === 0 && isDev) {
         await this.ensureDevelopmentSeed();
-        const recheck = await pool.query<SiteEntry>(
-          'SELECT id, website_name, website_url, website_short_description, is_updated_latest, llms_txt_storage, llms_full_txt_storage, status, created_at, updated_at FROM site_entries ORDER BY updated_at DESC'
-        );
+        const recheck = await pool.query<SiteEntry>(selectAllSql);
         if (recheck.rows.length > 0) {
           return recheck.rows.map(formatRow);
         }
@@ -141,22 +183,26 @@ export class DatabaseClient {
 
       return result.rows.map(formatRow);
     } catch (err) {
+      // Fall back to mock data in dev if DB is offline.
       if (isDev) {
-        console.warn('[DatabaseClient] PostgreSQL query error:', err instanceof Error ? err.message : err);
+        const msg = err instanceof Error ? err.message : err;
+        console.warn('[DatabaseClient] PostgreSQL query error:', msg);
         return MOCK_SEED_ENTRIES;
       }
       throw err;
     }
   }
 
+  // Search entries by text with pagination.
   async searchEntries(
     query: string,
     limit = 50,
     offset = 0
   ): Promise<{ entries: SiteEntry[]; total: number }> {
-    const isDev = process.env.NODE_ENV !== 'production' || connectionString.includes('localhost');
+    const isDev = isDevMode();
     const q = query.trim();
 
+    // Return paged list if query is empty.
     if (!q) {
       const all = await this.listEntries();
       return {
@@ -171,7 +217,7 @@ export class DatabaseClient {
 
     try {
       const pool = this.getPool();
-      // Built-in PostgreSQL Full-Text Search with ranking and substring fallback
+      // Search using Postgres full-text search and ILIKE fallback.
       const sql = `
         SELECT id, website_name, website_url, website_short_description,
                is_updated_latest, llms_txt_storage, llms_full_txt_storage,
@@ -191,21 +237,25 @@ export class DatabaseClient {
       `;
 
       const result = await pool.query(sql, [q, limit, offset]);
-      const total = result.rows.length > 0 ? Number(result.rows[0].full_count) : 0;
+      let total = 0;
+      if (result.rows.length > 0) {
+        total = Number(result.rows[0].full_count);
+      }
 
       return {
         entries: result.rows.map(formatRow),
         total,
       };
     } catch (err) {
+      // Filter mock data in memory if DB fails in dev.
       if (isDev) {
         const lowerQ = q.toLowerCase();
-        const matches = MOCK_SEED_ENTRIES.filter(
-          (e) =>
-            (e.website_name ?? '').toLowerCase().includes(lowerQ) ||
-            (e.website_short_description ?? '').toLowerCase().includes(lowerQ) ||
-            e.website_url.toLowerCase().includes(lowerQ)
-        );
+        const matches: SiteEntry[] = [];
+        for (const entry of MOCK_SEED_ENTRIES) {
+          if (entryMatchesQuery(entry, lowerQ)) {
+            matches.push(entry);
+          }
+        }
         return {
           entries: matches.slice(offset, offset + limit),
           total: matches.length,
@@ -215,47 +265,63 @@ export class DatabaseClient {
     }
   }
 
+  // Find one entry by ID.
   async getEntryById(id: string): Promise<SiteEntry | null> {
     const pool = this.getPool();
     const result = await pool.query<SiteEntry>('SELECT * FROM site_entries WHERE id = $1', [id]);
-    return result.rows[0] ? formatRow(result.rows[0]) : null;
+    if (result.rows.length === 0) {
+      return null;
+    }
+    return formatRow(result.rows[0]);
   }
 
+  // Insert a new entry.
   async createEntry(input: CreateSiteEntryRequest): Promise<SiteEntry> {
     const pool = this.getPool();
+    const description = input.website_short_description || '';
     const result = await pool.query<SiteEntry>(
       `INSERT INTO site_entries (website_url, website_short_description)
        VALUES ($1, $2)
        RETURNING *`,
-      [input.website_url, input.website_short_description ?? '']
+      [input.website_url, description]
     );
     return formatRow(result.rows[0]);
   }
 
+  // Update fields on an existing entry.
   async updateEntry(id: string, patch: Partial<SiteEntry>): Promise<SiteEntry | null> {
     const pool = this.getPool();
     const sets: string[] = [];
     const values: any[] = [];
-    let i = 1;
+    let paramIndex = 1;
 
     for (const [key, val] of Object.entries(patch)) {
-      sets.push(`${key} = $${i++}`);
+      sets.push(`${key} = $${paramIndex}`);
       values.push(val);
+      paramIndex += 1;
     }
-    if (sets.length === 0) return this.getEntryById(id);
+
+    if (sets.length === 0) {
+      return this.getEntryById(id);
+    }
 
     values.push(id);
     const result = await pool.query<SiteEntry>(
-      `UPDATE site_entries SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${i} RETURNING *`,
+      `UPDATE site_entries SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${paramIndex} RETURNING *`,
       values
     );
-    return result.rows[0] ? formatRow(result.rows[0]) : null;
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+    return formatRow(result.rows[0]);
   }
 
+  // Get entries that need updating.
   async findStaleEntries(): Promise<SiteEntry[]> {
     const pool = this.getPool();
     const result = await pool.query<SiteEntry>(
-      `SELECT * FROM site_entries WHERE is_updated_latest = false`
+      'SELECT * FROM site_entries WHERE is_updated_latest = false'
     );
     return result.rows.map(formatRow);
   }
