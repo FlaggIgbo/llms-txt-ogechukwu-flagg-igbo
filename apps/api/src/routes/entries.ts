@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { db } from '@llmstxt/database';
+import { logError } from '../services/logger.js';
 
 export async function handleGetEntries(_req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
@@ -10,7 +11,7 @@ export async function handleGetEntries(_req: IncomingMessage, res: ServerRespons
     });
     res.end(JSON.stringify(entries));
   } catch (error) {
-    console.error('[API Gateway] handleGetEntries error:', error);
+    logError(error, { endpoint: 'GET /entries' });
     res.writeHead(500, {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',

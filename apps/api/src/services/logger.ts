@@ -1,0 +1,43 @@
+import * as Sentry from '@sentry/node';
+
+const SENTRY_DSN =
+  process.env.SENTRY_DSN ||
+  'https://7daee2a1d48df207d91c86b0fee15cf3@o4512439839096833.ingest.us.sentry.io/4512439858888704';
+
+const isDev = process.env.NODE_ENV === 'development' || (!process.env.NODE_ENV && !process.env.SENTRY_ENVIRONMENT);
+
+export function initSentry(): void {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    environment: process.env.NODE_ENV || 'production',
+    tracesSampleRate: isDev ? 1.0 : 0.1,
+  });
+}
+
+export function logInfo(message: string, ...optionalParams: unknown[]): void {
+  if (isDev) {
+    console.log(message, ...optionalParams);
+  } else {
+    Sentry.captureMessage(message, 'info');
+  }
+}
+
+export function logWarn(message: string, ...optionalParams: unknown[]): void {
+  if (isDev) {
+    console.warn(message, ...optionalParams);
+  } else {
+    Sentry.captureMessage(message, 'warning');
+  }
+}
+
+export function logError(error: unknown, context?: Record<string, unknown>): void {
+  if (isDev) {
+    console.error(error);
+  } else {
+    if (error instanceof Error) {
+      Sentry.captureException(error, { extra: context });
+    } else {
+      Sentry.captureMessage(String(error), 'error');
+    }
+  }
+}

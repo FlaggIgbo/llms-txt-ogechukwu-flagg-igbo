@@ -1,6 +1,10 @@
 import http from 'node:http';
+import * as Sentry from '@sentry/node';
 import { handleGetEntries, handlePostEntry } from './routes/entries.js';
 import { handleSearch } from './routes/search.js';
+import { initSentry, logInfo } from './services/logger.js';
+
+initSentry();
 
 const PORT = Number(process.env.API_PORT ?? 4000);
 
@@ -33,7 +37,7 @@ export function startApiServer(port: number = PORT): void {
   });
 
   server.listen(port, () => {
-    console.log(`[API Gateway] Listening on http://localhost:${port}`);
+    logInfo(`[API Gateway] Listening on http://localhost:${port}`);
   });
 }
 

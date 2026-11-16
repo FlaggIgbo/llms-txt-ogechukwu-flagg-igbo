@@ -12,7 +12,8 @@
   "dependencies": {
     "@llmstxt/database": "*",
     "@llmstxt/queue": "*",
-    "@llmstxt/shared-types": "*"
+    "@llmstxt/shared-types": "*",
+    "@sentry/node": "^11.12.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -110,7 +110,9 @@ export class DatabaseClient {
       }
       this.hasEnsuredSeed = true;
     } catch (err) {
-      console.warn('[DatabaseClient] Seed upsert skipped:', err instanceof Error ? err.message : err);
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('[DatabaseClient] Seed upsert skipped:', err instanceof Error ? err.message : err);
+      }
     }
   }
 
@@ -139,8 +141,8 @@ export class DatabaseClient {
 
       return result.rows.map(formatRow);
     } catch (err) {
-      console.warn('[DatabaseClient] PostgreSQL query error:', err instanceof Error ? err.message : err);
       if (isDev) {
+        console.warn('[DatabaseClient] PostgreSQL query error:', err instanceof Error ? err.message : err);
         return MOCK_SEED_ENTRIES;
       }
       throw err;
