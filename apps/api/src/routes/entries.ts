@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { db } from '@llmstxt/database';
 import { logError } from '../services/logger.js';
 
+// Return all directory entries.
 export async function handleGetEntries(_req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
     const entries = await db.listEntries();
@@ -20,6 +21,7 @@ export async function handleGetEntries(_req: IncomingMessage, res: ServerRespons
   }
 }
 
+// Placeholder for adding a new entry.
 export async function handlePostEntry(_req: IncomingMessage, res: ServerResponse): Promise<void> {
   res.writeHead(501, {
     'Content-Type': 'application/json',

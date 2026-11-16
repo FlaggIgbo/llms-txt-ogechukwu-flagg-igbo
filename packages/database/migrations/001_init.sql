@@ -1,7 +1,9 @@
--- 001_init.sql: Initial PostgreSQL schema for llmstxt-directory
+-- Initial database schema.
 
+-- Entry status options.
 CREATE TYPE entry_status AS ENUM ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED');
 
+-- Main directory table.
 CREATE TABLE IF NOT EXISTS site_entries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   website_name TEXT NOT NULL DEFAULT '',
@@ -15,13 +17,14 @@ CREATE TABLE IF NOT EXISTS site_entries (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Lookup and search indexes.
 CREATE INDEX IF NOT EXISTS idx_site_entries_website_url ON site_entries (website_url);
 CREATE INDEX IF NOT EXISTS idx_site_entries_is_updated_latest ON site_entries (is_updated_latest);
 CREATE INDEX IF NOT EXISTS idx_site_entries_search ON site_entries USING gin (
   to_tsvector('english', coalesce(website_name, '') || ' ' || coalesce(website_short_description, '') || ' ' || coalesce(website_url, ''))
 );
 
--- Initial seed data for development environment (upserted on startup)
+-- Default seed data.
 INSERT INTO site_entries (
   id,
   website_name,

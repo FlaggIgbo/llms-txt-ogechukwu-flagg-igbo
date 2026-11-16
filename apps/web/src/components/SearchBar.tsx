@@ -1,11 +1,13 @@
 import React from 'react';
 
+// Props for the search input.
 export interface SearchBarProps {
   value: string;
   onChange: (value: string) => void;
 }
 
-export const SearchBar: React.FC<SearchBarProps> = ({ value, onChange }) => {
+// Text input for filtering directory entries.
+export function SearchBar({ value, onChange }: SearchBarProps) {
   return (
     <input
       type="search"
@@ -15,4 +17,4 @@ export const SearchBar: React.FC<SearchBarProps> = ({ value, onChange }) => {
       onChange={(e) => onChange(e.target.value)}
     />
   );
-};
+}

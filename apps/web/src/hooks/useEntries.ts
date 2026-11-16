@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import type { SiteEntry, CreateSiteEntryRequest } from '@llmstxt/shared-types';
 
+// State and actions returned by useEntries.
 export interface UseEntriesResult {
   entries: SiteEntry[];
   loading: boolean;
@@ -9,6 +10,7 @@ export interface UseEntriesResult {
   submitEntry: (payload: CreateSiteEntryRequest) => Promise<unknown>;
 }
 
+// Sample entries for tests and fallback.
 export const MOCK_SEED_ENTRIES: SiteEntry[] = [
   {
     id: '00000000-0000-0000-0000-000000000001',
@@ -60,14 +62,29 @@ export const MOCK_SEED_ENTRIES: SiteEntry[] = [
   },
 ];
 
-const API_BASE = (import.meta as unknown as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL || 'http://localhost:4000';
+const env = (import.meta as any).env || {};
+const API_BASE = env.VITE_API_URL || 'http://localhost:4000';
 
+// Check if an entry matches the search text.
+export function matchesSearch(item: SiteEntry, query: string): boolean {
+  const q = query.toLowerCase().trim();
+  if (!q) return true;
+
+  const name = (item.website_name || '').toLowerCase();
+  const desc = (item.website_short_description || '').toLowerCase();
+  const url = (item.website_url || '').toLowerCase();
+
+  return name.includes(q) || desc.includes(q) || url.includes(q);
+}
+
+// Fetch, filter, and submit directory entries.
 export function useEntries(searchQuery = ''): UseEntriesResult {
   const [allEntries, setAllEntries] = useState<SiteEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchEntries = useCallback(async () => {
+  // Load entries from the API.
+  async function fetchEntries(): Promise<void> {
     setLoading(true);
     try {
       const response = await fetch(`${API_BASE}/entries`, {
@@ -79,11 +96,12 @@ export function useEntries(searchQuery = ''): UseEntriesResult {
       }
 
       const data = await response.json();
-      const rawList: SiteEntry[] = Array.isArray(data)
-        ? data
-        : Array.isArray(data.entries)
-        ? data.entries
-        : [];
+      let rawList: SiteEntry[] = [];
+      if (Array.isArray(data)) {
+        rawList = data;
+      } else if (data && Array.isArray(data.entries)) {
+        rawList = data.entries;
+      }
 
       setAllEntries(rawList);
       setError(null);
@@ -94,41 +112,37 @@ export function useEntries(searchQuery = ''): UseEntriesResult {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }
 
+  // Fetch once on mount.
   useEffect(() => {
     void fetchEntries();
-  }, [fetchEntries]);
+  }, []);
 
-  const submitEntry = useCallback(
-    async (payload: CreateSiteEntryRequest): Promise<unknown> => {
-      const response = await fetch(`${API_BASE}/entries`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to create entry: HTTP ${response.status}`);
-      }
-
-      const result = await response.json();
-      await fetchEntries();
-      return result;
-    },
-    [fetchEntries]
-  );
-
-  const filteredEntries = useMemo(() => {
-    if (!searchQuery.trim()) return allEntries;
-    const q = searchQuery.toLowerCase().trim();
-    return allEntries.filter((item) => {
-      const name = (item.website_name ?? '').toLowerCase();
-      const desc = (item.website_short_description ?? '').toLowerCase();
-      const url = (item.website_url ?? '').toLowerCase();
-      return name.includes(q) || desc.includes(q) || url.includes(q);
+  // Send a new entry to the API.
+  async function submitEntry(payload: CreateSiteEntryRequest): Promise<unknown> {
+    const response = await fetch(`${API_BASE}/entries`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
-  }, [allEntries, searchQuery]);
+
+    if (!response.ok) {
+      throw new Error(`Failed to create entry: HTTP ${response.status}`);
+    }
+
+    const result = await response.json();
+    await fetchEntries();
+    return result;
+  }
+
+  // Filter entries by search query.
+  const filteredEntries: SiteEntry[] = [];
+  for (const item of allEntries) {
+    if (matchesSearch(item, searchQuery)) {
+      filteredEntries.push(item);
+    }
+  }
 
   return {
     entries: filteredEntries,

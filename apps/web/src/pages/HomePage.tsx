@@ -1,6 +1,7 @@
 import React from 'react';
 import type { SiteEntry } from '@llmstxt/shared-types';
 
+// Props for the home page.
 export interface HomePageProps {
   entries: SiteEntry[];
   loading: boolean;
@@ -9,6 +10,7 @@ export interface HomePageProps {
   onSearchChange: (q: string) => void;
 }
 
-export const HomePage: React.FC<HomePageProps> = (_props) => {
+// Placeholder home page component.
+export function HomePage(_props: HomePageProps): React.ReactElement | null {
   return null;
-};
+}

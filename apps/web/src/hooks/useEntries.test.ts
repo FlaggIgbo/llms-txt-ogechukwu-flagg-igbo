@@ -2,14 +2,16 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
-import { useEntries, MOCK_SEED_ENTRIES } from './useEntries.js';
+import { useEntries, matchesSearch, MOCK_SEED_ENTRIES } from './useEntries.js';
 
 describe('useEntries and MOCK_SEED_ENTRIES', () => {
   describe('MOCK_SEED_ENTRIES', () => {
+    // Verify seed count.
     it('contains exactly 4 mock seed entries', () => {
       assert.equal(MOCK_SEED_ENTRIES.length, 4);
     });
 
+    // Verify required fields on each seed entry.
     it('has all required fields for each mock entry', () => {
       for (const entry of MOCK_SEED_ENTRIES) {
         assert.ok(entry.id, 'Entry should have an id');
@@ -22,6 +24,7 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
       }
     });
 
+    // Verify expected website names.
     it('contains expected known seed sites', () => {
       const names = MOCK_SEED_ENTRIES.map((e) => e.website_name);
       assert.ok(names.includes('FastAPI'));
@@ -32,6 +35,7 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
   });
 
   describe('useEntries hook', () => {
+    // Verify initial hook state.
     it('initializes with loading state when rendered', () => {
       let hookOutput: ReturnType<typeof useEntries> | undefined;
 
@@ -51,18 +55,17 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
       assert.equal(typeof hookOutput.submitEntry, 'function');
     });
 
+    // Verify case-insensitive search filtering.
     it('filters entries case-insensitively by search query', () => {
-      const q = 'anthropic';
-      const filtered = MOCK_SEED_ENTRIES.filter((item) => {
-        const name = (item.website_name ?? '').toLowerCase();
-        const desc = (item.website_short_description ?? '').toLowerCase();
-        const url = (item.website_url ?? '').toLowerCase();
-        return name.includes(q) || desc.includes(q) || url.includes(q);
-      });
+      const filtered = [];
+      for (const item of MOCK_SEED_ENTRIES) {
+        if (matchesSearch(item, 'anthropic')) {
+          filtered.push(item);
+        }
+      }
 
       assert.equal(filtered.length, 1);
       assert.equal(filtered[0].website_name, 'Anthropic Docs');
     });
   });
 });
-

@@ -4,9 +4,12 @@ import { DirectoryTable } from './components/DirectoryTable';
 import { useEntries } from './hooks/useEntries';
 import './App.css';
 
-export const App: React.FC = () => {
+// Main directory page component.
+export function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const { entries, loading, error, refresh } = useEntries(searchQuery);
+
+  const entryLabel = entries.length === 1 ? 'entry' : 'entries';
 
   return (
     <main className="directory-container">
@@ -35,7 +38,7 @@ export const App: React.FC = () => {
 
       <footer className="directory-footer">
         <span>
-          Showing {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
+          Showing {entries.length} {entryLabel}
         </span>
         <button className="refresh-button" onClick={() => void refresh()}>
           Refresh entries
@@ -43,6 +46,6 @@ export const App: React.FC = () => {
       </footer>
     </main>
   );
-};
+}
 
 export default App;
