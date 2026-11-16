@@ -13,6 +13,7 @@
   "dependencies": {
     "@google/genai": "^3.3.0",
     "@llmstxt/database": "*",
+    "@llmstxt/logger": "*",
     "@llmstxt/queue": "*",
     "@llmstxt/shared-types": "*",
     "@mozilla/readability": "^0.6.0",

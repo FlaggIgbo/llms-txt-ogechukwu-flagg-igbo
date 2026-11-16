@@ -1,9 +1,30 @@
 import pg from 'pg';
-import type { SiteEntry, CreateSiteEntryRequest } from '@llmstxt/shared-types';
+import type { SiteEntry, CreateSiteEntryRequest, SiteCadence } from '@llmstxt/shared-types';
+import { logWarn } from '@llmstxt/logger';
 
 // Database connection URL.
 const connectionString =
   process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/llmstxt_directory';
+
+// In-memory cadences for development fallback.
+const mockCadenceMap = new Map<string, SiteCadence>();
+
+// Convert a raw DB row into a SiteCadence.
+function formatCadenceRow(row: any): SiteCadence {
+  return {
+    site_id: row.site_id,
+    url: row.url,
+    site_category: row.site_category || null,
+    check_interval_hours: Number(row.check_interval_hours || 24),
+    unchanged_streak: Number(row.unchanged_streak || 0),
+    etag: row.etag || null,
+    last_modified: row.last_modified || null,
+    last_content_hash: row.last_content_hash || null,
+    last_checked_at: row.last_checked_at ? new Date(row.last_checked_at).toISOString() : null,
+    next_check_at: row.next_check_at ? new Date(row.next_check_at).toISOString() : new Date().toISOString(),
+    status: row.status || 'idle',
+  };
+}
 
 // Default rows for local development and testing.
 export const MOCK_SEED_ENTRIES: SiteEntry[] = [
@@ -151,8 +172,8 @@ export class DatabaseClient {
       this.hasEnsuredSeed = true;
     } catch (err) {
       if (process.env.NODE_ENV !== 'production') {
-        const msg = err instanceof Error ? err.message : err;
-        console.warn('[DatabaseClient] Seed upsert skipped:', msg);
+        const msg = err instanceof Error ? err.message : String(err);
+        logWarn(`[DatabaseClient] Seed upsert skipped: ${msg}`);
       }
     }
   }
@@ -185,8 +206,8 @@ export class DatabaseClient {
     } catch (err) {
       // Fall back to mock data in dev if DB is offline.
       if (isDev) {
-        const msg = err instanceof Error ? err.message : err;
-        console.warn('[DatabaseClient] PostgreSQL query error:', msg);
+        const msg = err instanceof Error ? err.message : String(err);
+        logWarn(`[DatabaseClient] PostgreSQL query error: ${msg}`);
         return MOCK_SEED_ENTRIES;
       }
       throw err;
@@ -324,6 +345,192 @@ export class DatabaseClient {
       'SELECT * FROM site_entries WHERE is_updated_latest = false'
     );
     return result.rows.map(formatRow);
+  }
+
+  // Get cadence row for a site.
+  async getCadenceBySiteId(siteId: string): Promise<SiteCadence | null> {
+    const isDev = isDevMode();
+    try {
+      const pool = this.getPool();
+      const res = await pool.query('SELECT * FROM site_cadence WHERE site_id = $1', [siteId]);
+      if (res.rows.length === 0) {
+        return mockCadenceMap.get(siteId) || null;
+      }
+      return formatCadenceRow(res.rows[0]);
+    } catch {
+      if (isDev) {
+        return mockCadenceMap.get(siteId) || null;
+      }
+      throw new Error(`Failed to get cadence for site ${siteId}`);
+    }
+  }
+
+  // Transactionally insert entry and its cadence schedule.
+  async createEntryWithCadence(
+    input: CreateSiteEntryRequest,
+    siteCategory: string = 'api_docs',
+    intervalHours: number = 24
+  ): Promise<{ entry: SiteEntry; cadence: SiteCadence }> {
+    const isDev = isDevMode();
+    const description = input.website_short_description || '';
+
+    try {
+      const pool = this.getPool();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const entryRes = await client.query(
+          `INSERT INTO site_entries (website_url, website_short_description)
+           VALUES ($1, $2)
+           RETURNING *`,
+          [input.website_url, description]
+        );
+        const entry = formatRow(entryRes.rows[0]);
+
+        const cadenceRes = await client.query(
+          `INSERT INTO site_cadence (site_id, url, site_category, check_interval_hours, next_check_at, status)
+           VALUES ($1, $2, $3, $4, NOW(), 'idle')
+           RETURNING *`,
+          [entry.id, entry.website_url, siteCategory, intervalHours]
+        );
+        const cadence = formatCadenceRow(cadenceRes.rows[0]);
+
+        await client.query('COMMIT');
+        return { entry, cadence };
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    } catch (err) {
+      if (isDev) {
+        const id = `00000000-0000-0000-0000-${Date.now().toString().slice(-12).padStart(12, '0')}`;
+        const newEntry: SiteEntry = {
+          id,
+          website_url: input.website_url,
+          website_short_description: description,
+          is_updated_latest: false,
+          llms_txt_storage: null,
+          llms_full_txt_storage: null,
+          status: 'PENDING',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        const newCadence: SiteCadence = {
+          site_id: id,
+          url: input.website_url,
+          site_category: siteCategory,
+          check_interval_hours: intervalHours,
+          unchanged_streak: 0,
+          etag: null,
+          last_modified: null,
+          last_content_hash: null,
+          last_checked_at: null,
+          next_check_at: new Date().toISOString(),
+          status: 'idle',
+        };
+        MOCK_SEED_ENTRIES.unshift(newEntry);
+        mockCadenceMap.set(id, newCadence);
+        return { entry: newEntry, cadence: newCadence };
+      }
+      throw err;
+    }
+  }
+
+  // Atomically claim due sites using FOR UPDATE SKIP LOCKED.
+  async claimDueCadenceSites(limit: number = 50): Promise<SiteCadence[]> {
+    const isDev = isDevMode();
+    try {
+      const pool = this.getPool();
+      const sql = `
+        UPDATE site_cadence
+        SET status = 'queued'
+        WHERE site_id IN (
+          SELECT site_id FROM site_cadence
+          WHERE next_check_at <= NOW() AND status = 'idle'
+          ORDER BY next_check_at ASC
+          LIMIT $1
+          FOR UPDATE SKIP LOCKED
+        )
+        RETURNING *;
+      `;
+      const result = await pool.query(sql, [limit]);
+      return result.rows.map(formatCadenceRow);
+    } catch (err) {
+      if (isDev) {
+        const claimed: SiteCadence[] = [];
+        const now = Date.now();
+        for (const [id, cad] of mockCadenceMap.entries()) {
+          if (cad.status === 'idle' && new Date(cad.next_check_at).getTime() <= now) {
+            cad.status = 'queued';
+            claimed.push({ ...cad });
+            if (claimed.length >= limit) break;
+          }
+        }
+        return claimed;
+      }
+      throw err;
+    }
+  }
+
+  // Update cadence metadata and next check time after a probe or full scrape.
+  async updateCadenceResult(
+    siteId: string,
+    result: {
+      newIntervalHours: number;
+      newStreak: number;
+      nextCheckAt: Date;
+      etag?: string | null;
+      lastModified?: string | null;
+      contentHash?: string | null;
+      siteCategory?: string | null;
+    }
+  ): Promise<void> {
+    const isDev = isDevMode();
+    try {
+      const pool = this.getPool();
+      const sql = `
+        UPDATE site_cadence
+        SET check_interval_hours = $1,
+            unchanged_streak = $2,
+            etag = COALESCE($3, etag),
+            last_modified = COALESCE($4, last_modified),
+            last_content_hash = COALESCE($5, last_content_hash),
+            site_category = COALESCE($6, site_category),
+            last_checked_at = NOW(),
+            next_check_at = $7,
+            status = 'idle'
+        WHERE site_id = $8;
+      `;
+      await pool.query(sql, [
+        result.newIntervalHours,
+        result.newStreak,
+        result.etag ?? null,
+        result.lastModified ?? null,
+        result.contentHash ?? null,
+        result.siteCategory ?? null,
+        result.nextCheckAt.toISOString(),
+        siteId,
+      ]);
+    } catch (err) {
+      if (isDev) {
+        const item = mockCadenceMap.get(siteId);
+        if (item) {
+          item.check_interval_hours = result.newIntervalHours;
+          item.unchanged_streak = result.newStreak;
+          if (result.etag !== undefined) item.etag = result.etag;
+          if (result.lastModified !== undefined) item.last_modified = result.lastModified;
+          if (result.contentHash !== undefined) item.last_content_hash = result.contentHash;
+          if (result.siteCategory) item.site_category = result.siteCategory;
+          item.last_checked_at = new Date().toISOString();
+          item.next_check_at = result.nextCheckAt.toISOString();
+          item.status = 'idle';
+        }
+        return;
+      }
+      throw err;
+    }
   }
 }
 

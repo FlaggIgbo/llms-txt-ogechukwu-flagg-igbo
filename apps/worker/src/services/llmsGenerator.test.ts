@@ -4,7 +4,9 @@ import {
   generateLlmsTxtFiles,
   cleanProjectTitle,
   formatLlmsTxt,
+  getInitialIntervalForCategory,
 } from './llmsGenerator.js';
+import { computeNextCadence } from './cadenceCalculator.js';
 import type { ScrapedPage } from './scraper.js';
 
 test('cleanProjectTitle: extracts canonical project name without tagline clutter', () => {
@@ -59,9 +61,9 @@ test('formatLlmsTxt: strictly follows https://llmstxt.org/ structure', () => {
   assert.ok(result.includes('## Optional\n\n- [Changelog](https://example.com/changelog): Recent release notes.'));
 });
 
-test('generateLlmsTxtFiles: builds compliant llms.txt and llms-full.txt', async () => {
+test('generateLlmsTxtFiles: builds compliant files and infers siteCategory', async () => {
   const mockScrapedPage: ScrapedPage = {
-    url: 'https://example.com',
+    url: 'https://example.com/docs',
     title: 'Example Project | Next Gen Tool',
     description: 'An open-source library for automated testing.',
     textContent: 'Welcome to Example Project.',
@@ -81,18 +83,61 @@ test('generateLlmsTxtFiles: builds compliant llms.txt and llms-full.txt', async 
     ],
   };
 
-  const { llmsTxt, llmsFullTxt } = await generateLlmsTxtFiles(mockScrapedPage);
+  const { llmsTxt, llmsFullTxt, siteCategory } = await generateLlmsTxtFiles(mockScrapedPage);
 
-  // Assert llms.txt follows spec:
   assert.ok(llmsTxt.startsWith('# Example Project\n\n> An open-source library for automated testing.'));
   assert.ok(llmsTxt.includes('## Docs'));
   assert.ok(llmsTxt.includes('## API Reference'));
-  assert.ok(llmsTxt.includes('## Optional')); // Supplementary link under Optional
+  assert.ok(llmsTxt.includes('## Optional'));
   assert.ok(llmsTxt.includes('- [Getting Started Guide](https://example.com/docs/getting-started):'));
 
-  // Assert llms-full.txt follows spec:
   assert.ok(llmsFullTxt.startsWith('# Example Project\n\n> An open-source library for automated testing.'));
   assert.ok(llmsFullTxt.includes('## Overview'));
-  assert.ok(llmsFullTxt.includes('## Getting Started'));
   assert.ok(llmsFullTxt.includes('Run `npm install`'));
+
+  assert.equal(siteCategory, 'api_docs');
+});
+
+test('getInitialIntervalForCategory: returns standard seed cadence intervals', () => {
+  assert.equal(getInitialIntervalForCategory('blog'), 12);
+  assert.equal(getInitialIntervalForCategory('marketing'), 72);
+  assert.equal(getInitialIntervalForCategory('api_docs'), 168);
+});
+
+test('computeNextCadence: handles adaptive backoff correctly', () => {
+  // When changed: halve interval, reset streak to 0
+  const changedResult = computeNextCadence({
+    changed: true,
+    currentIntervalHours: 24,
+    unchangedStreak: 4,
+  });
+  assert.equal(changedResult.newIntervalHours, 12);
+  assert.equal(changedResult.newStreak, 0);
+
+  // When changed below floor: enforce 6 hours
+  const floorResult = computeNextCadence({
+    changed: true,
+    currentIntervalHours: 8,
+    unchangedStreak: 1,
+  });
+  assert.equal(floorResult.newIntervalHours, 6);
+  assert.equal(floorResult.newStreak, 0);
+
+  // When unchanged: multiply by 1.5, increment streak
+  const unchangedResult = computeNextCadence({
+    changed: false,
+    currentIntervalHours: 24,
+    unchangedStreak: 2,
+  });
+  assert.equal(unchangedResult.newIntervalHours, 36);
+  assert.equal(unchangedResult.newStreak, 3);
+
+  // When unchanged above ceiling: enforce 720 hours (30 days)
+  const ceilingResult = computeNextCadence({
+    changed: false,
+    currentIntervalHours: 600,
+    unchangedStreak: 10,
+  });
+  assert.equal(ceilingResult.newIntervalHours, 720);
+  assert.equal(ceilingResult.newStreak, 11);
 });

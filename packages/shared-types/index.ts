@@ -42,6 +42,27 @@ export interface GenerateJobPayload {
   isScheduledUpdate?: boolean;
 }
 
+// Status of a cadence check.
+export type CadenceStatus = 'idle' | 'queued' | 'processing';
+
+// Known category types for a website.
+export type SiteCategory = 'api_docs' | 'blog' | 'marketing';
+
+// Record of a site's update cadence and schedule.
+export interface SiteCadence {
+  site_id: string;
+  url: string;
+  site_category: string | null;
+  check_interval_hours: number;
+  unchanged_streak: number;
+  etag: string | null;
+  last_modified: string | null;
+  last_content_hash: string | null;
+  last_checked_at: string | null;
+  next_check_at: string;
+  status: CadenceStatus;
+}
+
 // Record of a scheduled site check.
 export interface UpdateLog {
   id: string;
