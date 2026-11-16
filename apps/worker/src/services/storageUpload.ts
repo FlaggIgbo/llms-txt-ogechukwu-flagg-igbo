@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { assertValidLlmsFiles } from './llmsValidator.js';
 
 // Upload results with storage paths.
 export interface UploadResult {
@@ -22,6 +23,9 @@ export async function uploadToStorage(
   llmsTxt: string,
   llmsFullTxt: string
 ): Promise<UploadResult> {
+  // Validate file contents and adherence to llms.txt standard before writing to storage.
+  assertValidLlmsFiles(llmsTxt, llmsFullTxt);
+
   const provider = process.env.STORAGE_PROVIDER || 'local';
   const folderName = cleanUrlForFolder(websiteUrl);
 

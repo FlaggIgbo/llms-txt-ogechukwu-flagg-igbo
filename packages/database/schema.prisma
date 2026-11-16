@@ -14,18 +14,29 @@ enum EntryStatus {
   FAILED
 }
 
+enum JobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+}
+
 model SiteEntry {
-  id                        String       @id @default(uuid())
-  website_name              String       @default("")
-  website_url               String       @unique
-  website_short_description String       @default("")
-  is_updated_latest         Boolean      @default(false)
+  id                        String          @id @default(uuid())
+  website_name              String          @default("")
+  website_url               String
+  website_short_description String          @default("")
+  is_updated_latest         Boolean         @default(false)
   llms_txt_storage          String?
   llms_full_txt_storage     String?
-  status                    EntryStatus  @default(PENDING)
-  created_at                DateTime     @default(now())
-  updated_at                DateTime     @updatedAt
+  status                    EntryStatus     @default(PENDING)
+  error_message             String?
+  is_scheduled_update       Boolean         @default(false)
+  created_at                DateTime        @default(now())
+  updated_at                DateTime        @updatedAt
   cadence                   SiteCadence?
+  jobs                      BackgroundJob[]
 
   @@map("site_entries")
 }
@@ -46,4 +57,24 @@ model SiteCadence {
   entry                SiteEntry @relation(fields: [site_id], references: [id], onDelete: Cascade)
 
   @@map("site_cadence")
+}
+
+model BackgroundJob {
+  id                  String     @id @default(uuid())
+  entry_id            String
+  website_url         String
+  is_scheduled_update Boolean    @default(false)
+  status              JobStatus  @default(QUEUED)
+  attempts            Int        @default(0)
+  max_attempts        Int        @default(3)
+  last_error          String?
+  failed_at           DateTime?
+  created_at          DateTime   @default(now())
+  updated_at          DateTime   @updatedAt
+
+  entry               SiteEntry  @relation(fields: [entry_id], references: [id], onDelete: Cascade)
+
+  @@index([status, created_at], map: "idx_background_jobs_queue")
+  @@index([status, failed_at], map: "idx_background_jobs_dlq")
+  @@map("background_jobs")
 }

@@ -2,9 +2,28 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
-import { useEntries, matchesSearch, MOCK_SEED_ENTRIES } from './useEntries.js';
-import { resolveLlmTxtUrl } from '../components/DirectoryTable.js';
+import { useEntries, useUpdatingEntries, matchesSearch, MOCK_SEED_ENTRIES } from './useEntries.js';
+import { resolveLlmTxtUrl, DirectoryTable } from '../components/DirectoryTable.js';
 import { DirectoryCard } from '../components/DirectoryCard.js';
+import {
+  isValidUrl,
+  SubmissionForm,
+  DAILY_ENTRY_LIMIT,
+  RATE_LIMIT_STORAGE_KEY,
+  getSessionSubmissionCount,
+  recordSessionSubmission,
+  isSessionRateLimited,
+} from '../components/SubmissionForm.js';
+import {
+  checkIpRateLimit,
+  recordIpSubmission,
+  resetRateLimits,
+} from '../../../../apps/api/src/services/rateLimiter.js';
+import { db } from '@llmstxt/database';
+import { HomePage } from '../pages/HomePage.js';
+import { AddEntryPage } from '../pages/AddEntryPage.js';
+import { UpdatesPage } from '../pages/UpdatesPage.js';
+import { App } from '../App.js';
 
 describe('useEntries and MOCK_SEED_ENTRIES', () => {
   describe('MOCK_SEED_ENTRIES', () => {
@@ -89,6 +108,289 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
       const html = renderToString(React.createElement(DirectoryCard, { entry }));
       assert.ok(html.includes('href="https://r2.example.com/fastapi/llms.txt"'));
       assert.ok(html.includes('FastAPI'));
+    });
+  });
+
+  describe('DirectoryTable', () => {
+    it('returns empty output (null) when error is present', () => {
+      const html = renderToString(
+        React.createElement(DirectoryTable, {
+          entries: [],
+          error: 'Failed to fetch (localhost:4000)',
+        })
+      );
+      assert.equal(html, '');
+    });
+
+    it('renders table when error is null', () => {
+      const html = renderToString(
+        React.createElement(DirectoryTable, {
+          entries: MOCK_SEED_ENTRIES,
+          error: null,
+        })
+      );
+      assert.ok(html.includes('directory-table'));
+      assert.ok(html.includes('table-wrapper'));
+    });
+  });
+
+  describe('isValidUrl', () => {
+    it('accepts valid http and https URLs', () => {
+      assert.equal(isValidUrl('https://example.com'), true);
+      assert.equal(isValidUrl('http://example.com/llms.txt'), true);
+      assert.equal(isValidUrl('https://sub.domain.org/path?q=1'), true);
+    });
+
+    it('rejects invalid or non-http URLs', () => {
+      assert.equal(isValidUrl(''), false);
+      assert.equal(isValidUrl('not-a-url'), false);
+      assert.equal(isValidUrl('ftp://example.com'), false);
+      assert.equal(isValidUrl('javascript:alert(1)'), false);
+    });
+  });
+
+  describe('SubmissionForm & AddEntryPage', () => {
+    it('renders all 5 specified fields and submit button', () => {
+      const html = renderToString(
+        React.createElement(AddEntryPage, {
+          onSubmit: async () => {},
+        })
+      );
+
+      // Verify page and fields
+      assert.ok(html.includes('Product Name'));
+      assert.ok(html.includes('Website URL'));
+      assert.ok(html.includes('llms.txt URL'));
+      assert.ok(html.includes('llms-full.txt URL'));
+      assert.ok(html.includes('Additional Notes'));
+      assert.ok(html.includes('Submit Entry'));
+      assert.ok(html.includes('Daily submission limit: 20 entries per day'));
+    });
+
+    it('enforces rate limiting of 20 entries per day via sessionStorage', () => {
+      // Mock window.sessionStorage
+      const mockStorage: { [key: string]: string } = {};
+      const today = new Date().toISOString().slice(0, 10);
+      mockStorage[RATE_LIMIT_STORAGE_KEY] = JSON.stringify({ date: today, count: 20 });
+
+      (globalThis as any).window = {
+        sessionStorage: {
+          getItem: (key: string) => mockStorage[key] || null,
+          setItem: (key: string, val: string) => {
+            mockStorage[key] = val;
+          },
+        },
+      };
+
+      assert.equal(getSessionSubmissionCount(), 20);
+      assert.equal(isSessionRateLimited(), true);
+
+      // Rendering when rate limited shows warning and disables submit
+      const html = renderToString(
+        React.createElement(SubmissionForm, {
+          onSubmit: async () => {},
+        })
+      );
+
+      assert.ok(html.includes('exceeded your allowed entry adds'));
+      assert.ok(html.includes('Daily Limit Reached'));
+
+      delete (globalThis as any).window;
+    });
+  });
+
+  describe('IP Rate Limiter (backend)', () => {
+    it('allows up to 20 submissions per day and blocks the 21st', () => {
+      resetRateLimits();
+      const testIp = '192.168.1.100';
+
+      for (let i = 0; i < 20; i++) {
+        const check = checkIpRateLimit(testIp);
+        assert.equal(check.allowed, true, `Submission ${i + 1} should be allowed`);
+        assert.equal(check.remaining, 20 - i);
+        recordIpSubmission(testIp);
+      }
+
+      // 21st attempt should be blocked with rate limit
+      const blockedCheck = checkIpRateLimit(testIp);
+      assert.equal(blockedCheck.allowed, false, '21st submission should be blocked');
+      assert.equal(blockedCheck.remaining, 0);
+      assert.ok(blockedCheck.retryAfterSeconds > 0);
+
+      resetRateLimits();
+    });
+  });
+
+  describe('UpdatesPage', () => {
+    it('renders empty state when no entries are updating', () => {
+      const html = renderToString(
+        React.createElement(UpdatesPage, {
+          entries: MOCK_SEED_ENTRIES, // all COMPLETED & is_updated_latest = true
+          onRefresh: async () => {},
+        })
+      );
+
+      assert.ok(html.includes('No entries currently updating'));
+      assert.ok(!html.includes('updates-table'));
+    });
+
+    it('renders updating entries when status is PENDING or PROCESSING', () => {
+      const pendingEntry = {
+        ...MOCK_SEED_ENTRIES[0],
+        id: 'updating-1',
+        website_name: 'Queued Website',
+        website_url: 'https://queued.example.com',
+        status: 'PENDING' as const,
+        is_updated_latest: false,
+      };
+
+      const html = renderToString(
+        React.createElement(UpdatesPage, {
+          entries: [...MOCK_SEED_ENTRIES, pendingEntry],
+          onRefresh: async () => {},
+        })
+      );
+
+      assert.ok(html.includes('updates-table'));
+      assert.ok(html.includes('Queued Website'));
+      assert.ok(html.includes('Queued'));
+    });
+
+    it('shows error next to failed user submissions', () => {
+      const failedUserEntry = {
+        ...MOCK_SEED_ENTRIES[0],
+        id: 'failed-user-1',
+        website_name: 'Failed Site',
+        website_url: 'https://failed.example.com',
+        status: 'FAILED' as const,
+        error_message: 'Failed to crawl website: HTTP 404',
+        is_scheduled_update: false,
+      };
+
+      const html = renderToString(
+        React.createElement(UpdatesPage, {
+          entries: [failedUserEntry],
+          onRefresh: async () => {},
+        })
+      );
+
+      assert.ok(html.includes('updates-table'));
+      assert.ok(html.includes('Failed Site'));
+      assert.ok(html.includes('Failed'));
+      assert.ok(html.includes('Failed to crawl website: HTTP 404'));
+      assert.ok(html.includes('entry-error-tag'));
+    });
+
+    it('shows inline error tag when URL already exists in site_entries table', () => {
+      const duplicateEntry = {
+        ...MOCK_SEED_ENTRIES[0],
+        id: 'dup-1',
+        website_name: 'FastAPI Clone',
+        website_url: 'https://fastapi.tiangolo.com',
+        status: 'FAILED' as const,
+        error_message: 'Website URL already exists in site_entries table',
+        is_scheduled_update: false,
+      };
+
+      const html = renderToString(
+        React.createElement(UpdatesPage, {
+          entries: [duplicateEntry],
+          onRefresh: async () => {},
+        })
+      );
+
+      assert.ok(html.includes('updates-table'));
+      assert.ok(html.includes('FastAPI Clone'));
+      assert.ok(html.includes('entry-error-tag'));
+      assert.ok(html.includes('error-duplicate-url'));
+      assert.ok(html.includes('Website URL already exists in site_entries table'));
+    });
+
+    it('excludes cron-scheduled failed entries from the updates queue', () => {
+      const failedCronEntry = {
+        ...MOCK_SEED_ENTRIES[0],
+        id: 'failed-cron-1',
+        website_name: 'Cron Failed Site',
+        website_url: 'https://cron-failed.example.com',
+        status: 'FAILED' as const,
+        error_message: 'Probe timeout',
+        is_scheduled_update: true,
+      };
+
+      const html = renderToString(
+        React.createElement(UpdatesPage, {
+          entries: [failedCronEntry],
+          onRefresh: async () => {},
+        })
+      );
+
+      // Should show empty state since cron failure was filtered out of updates queue
+      assert.ok(html.includes('No entries currently updating'));
+      assert.ok(!html.includes('Cron Failed Site'));
+    });
+  });
+
+  describe('useUpdatingEntries hook', () => {
+    it('initializes with loading state when rendered', () => {
+      let hookOutput: ReturnType<typeof useUpdatingEntries> | undefined;
+
+      function TestUpdatingComponent() {
+        hookOutput = useUpdatingEntries();
+        return React.createElement('div', null, hookOutput.loading ? 'loading' : 'done');
+      }
+
+      const html = renderToString(React.createElement(TestUpdatingComponent));
+
+      assert.ok(html.includes('loading'));
+      assert.ok(hookOutput !== undefined);
+      assert.equal(hookOutput.loading, true);
+      assert.deepEqual(hookOutput.updatingEntries, []);
+      assert.equal(hookOutput.error, null);
+      assert.equal(typeof hookOutput.refresh, 'function');
+    });
+  });
+
+  describe('HomePage', () => {
+    it('hides table and footer when error banner is shown', () => {
+      const html = renderToString(
+        React.createElement(HomePage, {
+          entries: [],
+          loading: false,
+          error: 'Failed to fetch (localhost:4000)',
+          searchQuery: '',
+          onSearchChange: () => {},
+          onRefresh: async () => {},
+        })
+      );
+
+      assert.ok(html.includes('error-banner'));
+      assert.ok(html.includes('Failed to fetch (localhost:4000)'));
+      assert.ok(!html.includes('table-wrapper'));
+      assert.ok(!html.includes('directory-footer'));
+    });
+  });
+
+  describe('App with three tabs', () => {
+    it('renders three navigation tabs at the top', () => {
+      const html = renderToString(React.createElement(App));
+
+      assert.ok(html.includes('nav-tabs'));
+      assert.ok(html.includes('Directory'));
+      assert.ok(html.includes('Add Entry'));
+      assert.ok(html.includes('Updates'));
+    });
+  });
+
+  describe('Duplicate URL detection in site_entries', () => {
+    it('creates a failed entry with error tag when URL already exists in site_entries table', async () => {
+      const result = await db.createEntryWithCadence({
+        website_url: 'https://fastapi.tiangolo.com', // Already in MOCK_SEED_ENTRIES
+        website_name: 'FastAPI Clone',
+      });
+
+      assert.equal(result.entry.status, 'FAILED');
+      assert.equal(result.entry.is_scheduled_update, false);
+      assert.ok(result.entry.error_message?.includes('already exists in site_entries'));
     });
   });
 });

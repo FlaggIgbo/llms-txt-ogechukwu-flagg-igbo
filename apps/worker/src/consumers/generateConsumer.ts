@@ -1,5 +1,5 @@
 import { db } from '@llmstxt/database';
-import { generationQueue } from '@llmstxt/queue';
+import { generationQueue, type DeadLetterJob } from '@llmstxt/queue';
 import { logError } from '@llmstxt/logger';
 import type { GenerateJobPayload } from '@llmstxt/shared-types';
 import { scrapeWebsite } from '../services/scraper.js';
@@ -7,6 +7,7 @@ import {
   generateLlmsTxtFiles,
   getInitialIntervalForCategory,
 } from '../services/llmsGenerator.js';
+import { assertValidLlmsFiles } from '../services/llmsValidator.js';
 import { uploadToStorage } from '../services/storageUpload.js';
 import { probeWebsiteChanges, hashText } from '../services/siteProbe.js';
 import { computeNextCadence } from '../services/cadenceCalculator.js';
@@ -16,8 +17,22 @@ export async function handleGenerateJob(payload: GenerateJobPayload): Promise<vo
   const { entryId, websiteUrl, isScheduledUpdate } = payload;
 
   try {
-    // Mark entry as processing.
-    await db.updateEntry(entryId, { status: 'PROCESSING' });
+    // Check if the URL already exists in site_entries under another entry ID.
+    const existing = await db.getEntryByUrl(websiteUrl);
+    if (existing && existing.id !== entryId && existing.status === 'COMPLETED') {
+      await db.updateEntry(entryId, {
+        status: 'FAILED',
+        error_message: 'Website URL already exists in site_entries table',
+        is_scheduled_update: false,
+      });
+      return;
+    }
+
+    // Mark entry as processing and track whether it was triggered by cron.
+    await db.updateEntry(entryId, {
+      status: 'PROCESSING',
+      is_scheduled_update: Boolean(isScheduledUpdate),
+    });
 
     // Handle scheduled periodic updates.
     if (isScheduledUpdate) {
@@ -56,6 +71,10 @@ export async function handleGenerateJob(payload: GenerateJobPayload): Promise<vo
     // Full crawl and generation (for initial run or detected changes).
     const scraped = await scrapeWebsite(websiteUrl);
     const files = await generateLlmsTxtFiles(scraped);
+
+    // Verify generated files adhere to standard structure and are not corrupted before upload.
+    assertValidLlmsFiles(files.llmsTxt, files.llmsFullTxt);
+
     const uploaded = await uploadToStorage(websiteUrl, files.llmsTxt, files.llmsFullTxt);
 
     // Update main entry record.
@@ -66,6 +85,8 @@ export async function handleGenerateJob(payload: GenerateJobPayload): Promise<vo
       llms_txt_storage: uploaded.llmsTxtUri,
       llms_full_txt_storage: uploaded.llmsFullTxtUri,
       status: 'COMPLETED',
+      error_message: null,
+      is_scheduled_update: false,
     });
 
     // Update cadence table with new interval and content hash.
@@ -89,11 +110,36 @@ export async function handleGenerateJob(payload: GenerateJobPayload): Promise<vo
     });
   } catch (err) {
     logError(err, { websiteUrl, entryId, context: 'Worker' });
-    await db.updateEntry(entryId, { status: 'FAILED' });
+    // Rethrow so the queue performs retries (up to 3 times) before moving to DLQ.
+    throw err;
+  }
+}
+
+// Handle jobs that exhausted all 3 retries and entered the DLQ.
+export async function handleDeadLetterJob(dlqJob: DeadLetterJob): Promise<void> {
+  const { entryId, isScheduledUpdate } = dlqJob.payload;
+
+  if (isScheduledUpdate) {
+    // Cron-scheduled update failed: remove from the frontend "updates" queue.
+    // Revert entry status back to COMPLETED so existing directory entry remains active.
+    await db.updateEntry(entryId, {
+      status: 'COMPLETED',
+      is_updated_latest: true,
+      error_message: null,
+      is_scheduled_update: true,
+    });
+  } else {
+    // User-submitted entry failed: mark as FAILED with error message to show on updates page.
+    await db.updateEntry(entryId, {
+      status: 'FAILED',
+      error_message: dlqJob.error || 'Failed to crawl and generate llms.txt files after 3 attempts',
+      is_scheduled_update: false,
+    });
   }
 }
 
 // Listen for and process generation jobs.
 export function startGenerateConsumer(): void {
   generationQueue.registerConsumer(handleGenerateJob);
+  generationQueue.onDeadLetter(handleDeadLetterJob);
 }

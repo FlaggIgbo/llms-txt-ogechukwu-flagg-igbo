@@ -4,6 +4,7 @@ import type { SiteEntry, CreateSiteEntryRequest } from '@llmstxt/shared-types';
 // State and actions returned by useEntries.
 export interface UseEntriesResult {
   entries: SiteEntry[];
+  allEntries: SiteEntry[];
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -128,7 +129,16 @@ export function useEntries(searchQuery = ''): UseEntriesResult {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to create entry: HTTP ${response.status}`);
+      let errorMsg = `Failed to create entry: HTTP ${response.status}`;
+      try {
+        const errorData = await response.json();
+        if (errorData?.error) {
+          errorMsg = errorData.error;
+        }
+      } catch {
+        // Fall back to HTTP status message.
+      }
+      throw new Error(errorMsg);
     }
 
     const result = await response.json();
@@ -146,9 +156,66 @@ export function useEntries(searchQuery = ''): UseEntriesResult {
 
   return {
     entries: filteredEntries,
+    allEntries,
     loading,
     error,
     refresh: fetchEntries,
     submitEntry,
+  };
+}
+
+// State and actions returned by useUpdatingEntries.
+export interface UseUpdatingEntriesResult {
+  updatingEntries: SiteEntry[];
+  loading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+}
+
+// Fetch entries that are currently pending, processing, or failed user submissions.
+export function useUpdatingEntries(): UseUpdatingEntriesResult {
+  const [updatingEntries, setUpdatingEntries] = useState<SiteEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  async function fetchUpdating(): Promise<void> {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/entries?status=Pending`, {
+        headers: { Accept: 'application/json' },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      let rawList: SiteEntry[] = [];
+      if (Array.isArray(data)) {
+        rawList = data;
+      } else if (data && Array.isArray(data.entries)) {
+        rawList = data.entries;
+      }
+
+      setUpdatingEntries(rawList);
+      setError(null);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to fetch updating entries';
+      setError(message);
+      setUpdatingEntries([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void fetchUpdating();
+  }, []);
+
+  return {
+    updatingEntries,
+    loading,
+    error,
+    refresh: fetchUpdating,
   };
 }

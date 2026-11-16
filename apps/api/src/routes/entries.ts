@@ -4,6 +4,12 @@ import { generationQueue } from '@llmstxt/queue';
 import type { SiteEntry, CreateSiteEntryRequest } from '@llmstxt/shared-types';
 import { logError } from '../services/logger.js';
 import { storageService } from '../services/storageService.js';
+import {
+  getClientIp,
+  checkIpRateLimit,
+  recordIpSubmission,
+  DAILY_ENTRY_LIMIT,
+} from '../services/rateLimiter.js';
 
 // Read JSON body from incoming HTTP request.
 async function parseJsonBody<T>(req: IncomingMessage): Promise<T> {
@@ -43,10 +49,35 @@ export function formatEntryStorageUrls(entry: SiteEntry): SiteEntry {
   };
 }
 
-// Return all directory entries.
-export async function handleGetEntries(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+// Return directory entries filtered by status or default to completed entries.
+export async function handleGetEntries(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
-    const entries = await db.listEntries();
+    const rawUrl = req.url || '/';
+    const parsedUrl = new URL(rawUrl, `http://${req.headers.host || 'localhost'}`);
+    const statusParam = parsedUrl.searchParams.get('status');
+
+    let entries = await db.listEntries();
+
+    if (!statusParam) {
+      // Default: only return completed / confirmed entries for the home page.
+      entries = entries.filter((entry) => entry.status === 'COMPLETED');
+    } else if (statusParam.toLowerCase() === 'pending' || statusParam.toLowerCase() === 'updating') {
+      // Updates page: return entries in progress (PENDING, PROCESSING),
+      // and user-submitted entries that failed (to show an error next to them).
+      // Entries updated from the cron scheduler that failed are excluded.
+      entries = entries.filter((entry) => {
+        if (entry.status === 'PENDING' || entry.status === 'PROCESSING') {
+          return true;
+        }
+        if (entry.status === 'FAILED' && !entry.is_scheduled_update) {
+          return true;
+        }
+        return false;
+      });
+    } else {
+      entries = entries.filter((entry) => entry.status.toLowerCase() === statusParam.toLowerCase());
+    }
+
     const formatted = entries.map(formatEntryStorageUrls);
 
     res.writeHead(200, {
@@ -67,6 +98,28 @@ export async function handleGetEntries(_req: IncomingMessage, res: ServerRespons
 // Create a new site entry with an initial cadence schedule.
 export async function handlePostEntry(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
+    // Check IP rate limit (max 20 entries per day per IP).
+    const clientIp = getClientIp(req);
+    const rateCheck = checkIpRateLimit(clientIp);
+
+    if (!rateCheck.allowed) {
+      res.writeHead(429, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Retry-After': String(rateCheck.retryAfterSeconds),
+        'X-RateLimit-Limit': String(DAILY_ENTRY_LIMIT),
+        'X-RateLimit-Remaining': '0',
+      });
+      res.end(
+        JSON.stringify({
+          error:
+            'You have exceeded your allowed entry adds for today (maximum 20 entries per day). Please try again tomorrow.',
+          retryAfter: rateCheck.retryAfterSeconds,
+        })
+      );
+      return;
+    }
+
     const body = await parseJsonBody<CreateSiteEntryRequest>(req);
 
     if (!body.website_url) {
@@ -81,16 +134,23 @@ export async function handlePostEntry(req: IncomingMessage, res: ServerResponse)
     // Insert into site_entries and site_cadence in one transaction.
     const { entry } = await db.createEntryWithCadence(body);
 
-    // Queue initial background crawl and generation job.
-    await generationQueue.enqueueGenerateJob({
-      entryId: entry.id,
-      websiteUrl: entry.website_url,
-      isScheduledUpdate: false,
-    });
+    // Queue background generation job only if not already failed (e.g. duplicate URL).
+    if (entry.status !== 'FAILED') {
+      await generationQueue.enqueueGenerateJob({
+        entryId: entry.id,
+        websiteUrl: entry.website_url,
+        isScheduledUpdate: false,
+      });
+    }
+
+    // Record submission for rate limiter.
+    recordIpSubmission(clientIp);
 
     res.writeHead(201, {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
+      'X-RateLimit-Limit': String(DAILY_ENTRY_LIMIT),
+      'X-RateLimit-Remaining': String(Math.max(0, rateCheck.remaining - 1)),
     });
     res.end(JSON.stringify(formatEntryStorageUrls(entry)));
   } catch (error) {

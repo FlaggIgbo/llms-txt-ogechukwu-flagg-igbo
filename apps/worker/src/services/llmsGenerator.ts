@@ -384,3 +384,13 @@ export async function generateLlmsTxtFiles(
     siteCategory: categorized.siteCategory || 'api_docs',
   };
 }
+
+export {
+  validateLlmsTxt,
+  validateLlmsFullTxt,
+  assertValidLlmsFiles,
+  LlmsValidationError,
+  type ValidationResult,
+  type ValidationStats,
+} from './llmsValidator.js';
+

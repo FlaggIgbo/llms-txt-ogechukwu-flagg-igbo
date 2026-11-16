@@ -12,6 +12,8 @@ export interface SiteEntry {
   llms_full_txt_storage: string | null;
   llm_txt?: string | null;
   status: EntryStatus;
+  error_message?: string | null;
+  is_scheduled_update?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -19,7 +21,15 @@ export interface SiteEntry {
 // Input for adding a new website.
 export interface CreateSiteEntryRequest {
   website_url: string;
+  website_name?: string;
+  product_name?: string;
   website_short_description?: string;
+  additional_notes?: string;
+  llms_txt_url?: string;
+  llm_txt?: string;
+  llms_txt_storage?: string;
+  llms_full_txt_url?: string;
+  llms_full_txt_storage?: string;
 }
 
 // Parameters for searching entries.
@@ -33,6 +43,24 @@ export interface SearchQuery {
 export interface SearchResult {
   entries: SiteEntry[];
   total: number;
+}
+
+// Status of a background job.
+export type JobStatus = 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'DEAD_LETTER';
+
+// Record of a background job in the queue and DLQ.
+export interface BackgroundJob {
+  id: string;
+  entry_id: string;
+  website_url: string;
+  is_scheduled_update: boolean;
+  status: JobStatus;
+  attempts: number;
+  max_attempts: number;
+  last_error: string | null;
+  failed_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // Data sent to the background worker queue.

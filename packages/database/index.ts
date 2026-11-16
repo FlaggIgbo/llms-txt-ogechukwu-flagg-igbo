@@ -1,5 +1,12 @@
 import pg from 'pg';
-import type { SiteEntry, CreateSiteEntryRequest, SiteCadence } from '@llmstxt/shared-types';
+import type {
+  SiteEntry,
+  CreateSiteEntryRequest,
+  SiteCadence,
+  BackgroundJob,
+  GenerateJobPayload,
+  JobStatus,
+} from '@llmstxt/shared-types';
 import { logWarn } from '@llmstxt/logger';
 
 // Database connection URL.
@@ -8,6 +15,25 @@ const connectionString =
 
 // In-memory cadences for development fallback.
 const mockCadenceMap = new Map<string, SiteCadence>();
+// In-memory background jobs for development fallback.
+const mockJobsMap = new Map<string, BackgroundJob>();
+
+// Convert a raw DB row into a BackgroundJob.
+function formatJobRow(row: any): BackgroundJob {
+  return {
+    id: String(row.id),
+    entry_id: String(row.entry_id),
+    website_url: String(row.website_url),
+    is_scheduled_update: Boolean(row.is_scheduled_update),
+    status: row.status as JobStatus,
+    attempts: Number(row.attempts || 0),
+    max_attempts: Number(row.max_attempts || 3),
+    last_error: row.last_error || null,
+    failed_at: row.failed_at ? new Date(row.failed_at).toISOString() : null,
+    created_at: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+    updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
+  };
+}
 
 // Convert a raw DB row into a SiteCadence.
 function formatCadenceRow(row: any): SiteCadence {
@@ -103,6 +129,8 @@ function formatRow(row: any): SiteEntry {
 
   return {
     ...row,
+    error_message: row.error_message || null,
+    is_scheduled_update: Boolean(row.is_scheduled_update),
     created_at: createdAt,
     updated_at: updatedAt,
     llm_txt: llmTxt,
@@ -140,6 +168,39 @@ export class DatabaseClient {
     if (this.hasEnsuredSeed) return;
     try {
       const pool = this.getPool();
+      await pool
+        .query(
+          `ALTER TABLE site_entries ADD COLUMN IF NOT EXISTS error_message TEXT;
+           ALTER TABLE site_entries ADD COLUMN IF NOT EXISTS is_scheduled_update BOOLEAN NOT NULL DEFAULT FALSE;
+           ALTER TABLE site_entries DROP CONSTRAINT IF EXISTS site_entries_website_url_key;
+           CREATE UNIQUE INDEX IF NOT EXISTS idx_site_entries_completed_url ON site_entries (website_url) WHERE status = 'COMPLETED';
+
+           DO $$
+           BEGIN
+             IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'job_status') THEN
+               CREATE TYPE job_status AS ENUM ('QUEUED', 'PROCESSING', 'COMPLETED', 'FAILED', 'DEAD_LETTER');
+             END IF;
+           END $$;
+
+           CREATE TABLE IF NOT EXISTS background_jobs (
+             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+             entry_id UUID NOT NULL REFERENCES site_entries(id) ON DELETE CASCADE,
+             website_url TEXT NOT NULL,
+             is_scheduled_update BOOLEAN NOT NULL DEFAULT FALSE,
+             status job_status NOT NULL DEFAULT 'QUEUED',
+             attempts INT NOT NULL DEFAULT 0,
+             max_attempts INT NOT NULL DEFAULT 3,
+             last_error TEXT,
+             failed_at TIMESTAMPTZ,
+             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+           );
+
+           CREATE INDEX IF NOT EXISTS idx_background_jobs_queue ON background_jobs (status, created_at) WHERE status = 'QUEUED';
+           CREATE INDEX IF NOT EXISTS idx_background_jobs_dlq ON background_jobs (status, failed_at) WHERE status = 'DEAD_LETTER';`
+        )
+        .catch(() => {});
+
       for (const entry of MOCK_SEED_ENTRIES) {
         await pool.query(
           `INSERT INTO site_entries (
@@ -296,15 +357,51 @@ export class DatabaseClient {
     return formatRow(result.rows[0]);
   }
 
+  // Find one entry by website URL (normalizing trailing slashes).
+  async getEntryByUrl(url: string): Promise<SiteEntry | null> {
+    const isDev = isDevMode();
+    const cleanUrl = trimTrailingSlashes(url.trim()).toLowerCase();
+
+    if (isDev && !this.hasEnsuredSeed) {
+      await this.ensureDevelopmentSeed();
+    }
+
+    try {
+      const pool = this.getPool();
+      const res = await pool.query<SiteEntry>(
+        `SELECT * FROM site_entries 
+         WHERE lower(rtrim(website_url, '/')) = $1 
+         ORDER BY (status = 'COMPLETED') DESC, created_at DESC
+         LIMIT 1`,
+        [cleanUrl]
+      );
+      if (res.rows.length === 0) {
+        return null;
+      }
+      return formatRow(res.rows[0]);
+    } catch (err) {
+      if (isDev) {
+        const found = MOCK_SEED_ENTRIES.find(
+          (e) => trimTrailingSlashes(e.website_url).toLowerCase() === cleanUrl
+        );
+        return found || null;
+      }
+      throw err;
+    }
+  }
+
   // Insert a new entry.
   async createEntry(input: CreateSiteEntryRequest): Promise<SiteEntry> {
     const pool = this.getPool();
-    const description = input.website_short_description || '';
+    const websiteName = input.website_name || input.product_name || '';
+    const description = input.website_short_description || input.additional_notes || '';
+    const llmsTxt = input.llms_txt_storage || input.llms_txt_url || input.llm_txt || null;
+    const llmsFullTxt = input.llms_full_txt_storage || input.llms_full_txt_url || null;
     const result = await pool.query<SiteEntry>(
-      `INSERT INTO site_entries (website_url, website_short_description)
-       VALUES ($1, $2)
+      `INSERT INTO site_entries (website_name, website_url, website_short_description, llms_txt_storage, llms_full_txt_storage)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [input.website_url, description]
+      [websiteName, input.website_url, description, llmsTxt, llmsFullTxt]
     );
     return formatRow(result.rows[0]);
   }
@@ -372,7 +469,73 @@ export class DatabaseClient {
     intervalHours: number = 24
   ): Promise<{ entry: SiteEntry; cadence: SiteCadence }> {
     const isDev = isDevMode();
-    const description = input.website_short_description || '';
+    const websiteName = input.website_name || input.product_name || '';
+    const description = input.website_short_description || input.additional_notes || '';
+    const llmsTxt = input.llms_txt_storage || input.llms_txt_url || input.llm_txt || null;
+    const llmsFullTxt = input.llms_full_txt_storage || input.llms_full_txt_url || null;
+
+    // Check if the URL already exists in our site_entries table.
+    const existing = await this.getEntryByUrl(input.website_url);
+    if (existing && existing.status === 'COMPLETED') {
+      const duplicateError = 'Website URL already exists in site_entries table';
+      const id = `00000000-0000-0000-0000-${Date.now().toString().slice(-12).padStart(12, '0')}`;
+      const duplicateEntry: SiteEntry = {
+        id,
+        website_name: websiteName || existing.website_name,
+        website_url: input.website_url,
+        website_short_description: description || existing.website_short_description,
+        is_updated_latest: false,
+        llms_txt_storage: llmsTxt || existing.llms_txt_storage,
+        llms_full_txt_storage: llmsFullTxt || existing.llms_full_txt_storage,
+        llm_txt: llmsTxt || existing.llm_txt,
+        status: 'FAILED',
+        error_message: duplicateError,
+        is_scheduled_update: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const duplicateCadence: SiteCadence = {
+        site_id: id,
+        url: input.website_url,
+        site_category: siteCategory,
+        check_interval_hours: intervalHours,
+        unchanged_streak: 0,
+        etag: null,
+        last_modified: null,
+        last_content_hash: null,
+        last_checked_at: null,
+        next_check_at: new Date().toISOString(),
+        status: 'idle',
+      };
+
+      if (isDev) {
+        MOCK_SEED_ENTRIES.unshift(duplicateEntry);
+        return { entry: duplicateEntry, cadence: duplicateCadence };
+      }
+
+      try {
+        const pool = this.getPool();
+        const res = await pool.query<SiteEntry>(
+          `INSERT INTO site_entries (
+             website_name, website_url, website_short_description,
+             llms_txt_storage, llms_full_txt_storage, status, is_updated_latest,
+             error_message, is_scheduled_update
+           ) VALUES ($1, $2, $3, $4, $5, 'FAILED', FALSE, $6, FALSE)
+           RETURNING *`,
+          [
+            duplicateEntry.website_name,
+            duplicateEntry.website_url,
+            duplicateEntry.website_short_description,
+            duplicateEntry.llms_txt_storage,
+            duplicateEntry.llms_full_txt_storage,
+            duplicateError,
+          ]
+        );
+        return { entry: formatRow(res.rows[0]), cadence: duplicateCadence };
+      } catch {
+        return { entry: duplicateEntry, cadence: duplicateCadence };
+      }
+    }
 
     try {
       const pool = this.getPool();
@@ -380,10 +543,12 @@ export class DatabaseClient {
       try {
         await client.query('BEGIN');
         const entryRes = await client.query(
-          `INSERT INTO site_entries (website_url, website_short_description)
-           VALUES ($1, $2)
+          `INSERT INTO site_entries (
+             website_name, website_url, website_short_description,
+             llms_txt_storage, llms_full_txt_storage, status, is_updated_latest
+           ) VALUES ($1, $2, $3, $4, $5, 'PENDING', FALSE)
            RETURNING *`,
-          [input.website_url, description]
+          [websiteName, input.website_url, description, llmsTxt, llmsFullTxt]
         );
         const entry = formatRow(entryRes.rows[0]);
 
@@ -408,12 +573,16 @@ export class DatabaseClient {
         const id = `00000000-0000-0000-0000-${Date.now().toString().slice(-12).padStart(12, '0')}`;
         const newEntry: SiteEntry = {
           id,
+          website_name: websiteName,
           website_url: input.website_url,
           website_short_description: description,
           is_updated_latest: false,
-          llms_txt_storage: null,
-          llms_full_txt_storage: null,
+          llms_txt_storage: llmsTxt,
+          llms_full_txt_storage: llmsFullTxt,
+          llm_txt: llmsTxt,
           status: 'PENDING',
+          error_message: null,
+          is_scheduled_update: false,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
@@ -528,6 +697,366 @@ export class DatabaseClient {
           item.status = 'idle';
         }
         return;
+      }
+      throw err;
+    }
+  }
+
+  // Insert a new background job into the queue table.
+  async createBackgroundJob(payload: GenerateJobPayload, maxAttempts: number = 3): Promise<BackgroundJob> {
+    const isDev = isDevMode();
+    const id = `00000000-0000-0000-0000-${Date.now().toString().slice(-12).padStart(12, '0')}`;
+    const now = new Date().toISOString();
+
+    const newJob: BackgroundJob = {
+      id,
+      entry_id: payload.entryId,
+      website_url: payload.websiteUrl,
+      is_scheduled_update: Boolean(payload.isScheduledUpdate),
+      status: 'QUEUED',
+      attempts: 0,
+      max_attempts: maxAttempts,
+      last_error: null,
+      failed_at: null,
+      created_at: now,
+      updated_at: now,
+    };
+
+    if (isDev && !this.hasEnsuredSeed) {
+      await this.ensureDevelopmentSeed();
+    }
+
+    try {
+      const pool = this.getPool();
+      const res = await pool.query(
+        `INSERT INTO background_jobs (
+           entry_id, website_url, is_scheduled_update, status, attempts, max_attempts, created_at, updated_at
+         ) VALUES ($1, $2, $3, 'QUEUED', 0, $4, NOW(), NOW())
+         RETURNING *`,
+        [payload.entryId, payload.websiteUrl, Boolean(payload.isScheduledUpdate), maxAttempts]
+      );
+      return formatJobRow(res.rows[0]);
+    } catch (err) {
+      if (isDev) {
+        mockJobsMap.set(id, newJob);
+        return newJob;
+      }
+      throw err;
+    }
+  }
+
+  // Atomically claim the next queued background job using SKIP LOCKED.
+  async claimNextBackgroundJob(): Promise<BackgroundJob | null> {
+    const isDev = isDevMode();
+
+    if (isDev && !this.hasEnsuredSeed) {
+      await this.ensureDevelopmentSeed();
+    }
+
+    try {
+      const pool = this.getPool();
+      const sql = `
+        UPDATE background_jobs
+        SET status = 'PROCESSING',
+            attempts = attempts + 1,
+            updated_at = NOW()
+        WHERE id = (
+          SELECT id FROM background_jobs
+          WHERE status = 'QUEUED'
+          ORDER BY created_at ASC
+          LIMIT 1
+          FOR UPDATE SKIP LOCKED
+        )
+        RETURNING *;
+      `;
+      const res = await pool.query(sql);
+      if (res.rows.length === 0) {
+        if (isDev) {
+          for (const job of mockJobsMap.values()) {
+            if (job.status === 'QUEUED') {
+              job.status = 'PROCESSING';
+              job.attempts += 1;
+              job.updated_at = new Date().toISOString();
+              return { ...job };
+            }
+          }
+        }
+        return null;
+      }
+      return formatJobRow(res.rows[0]);
+    } catch (err) {
+      if (isDev) {
+        for (const job of mockJobsMap.values()) {
+          if (job.status === 'QUEUED') {
+            job.status = 'PROCESSING';
+            job.attempts += 1;
+            job.updated_at = new Date().toISOString();
+            return { ...job };
+          }
+        }
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  // Mark a background job as successfully completed.
+  async completeBackgroundJob(jobId: string): Promise<void> {
+    const isDev = isDevMode();
+
+    try {
+      const pool = this.getPool();
+      const res = await pool.query(
+        `UPDATE background_jobs
+         SET status = 'COMPLETED',
+             updated_at = NOW()
+         WHERE id = $1`,
+        [jobId]
+      );
+      if (isDev && res.rowCount === 0) {
+        const job = mockJobsMap.get(jobId);
+        if (job) {
+          job.status = 'COMPLETED';
+          job.updated_at = new Date().toISOString();
+        }
+      }
+    } catch (err) {
+      if (isDev) {
+        const job = mockJobsMap.get(jobId);
+        if (job) {
+          job.status = 'COMPLETED';
+          job.updated_at = new Date().toISOString();
+        }
+        return;
+      }
+      throw err;
+    }
+  }
+
+  // Handle a failed background job: retry if attempts < max_attempts, or move to DEAD_LETTER (DLQ).
+  async failBackgroundJob(
+    jobId: string,
+    error: string,
+    currentAttempts?: number
+  ): Promise<{ job: BackgroundJob; isDeadLetter: boolean }> {
+    const isDev = isDevMode();
+
+    try {
+      const pool = this.getPool();
+      // First check existing attempts and max_attempts.
+      const checkRes = await pool.query('SELECT attempts, max_attempts FROM background_jobs WHERE id = $1', [jobId]);
+      if (checkRes.rows.length === 0) {
+        if (isDev && mockJobsMap.has(jobId)) {
+          const job = mockJobsMap.get(jobId)!;
+          const attemptsToUse = currentAttempts !== undefined ? currentAttempts : job.attempts;
+          job.attempts = attemptsToUse;
+          const isDeadLetter = attemptsToUse >= job.max_attempts;
+          job.status = isDeadLetter ? 'DEAD_LETTER' : 'QUEUED';
+          job.last_error = error;
+          job.updated_at = new Date().toISOString();
+          if (isDeadLetter) {
+            job.failed_at = new Date().toISOString();
+          }
+          return { job: { ...job }, isDeadLetter };
+        }
+        throw new Error(`Job ${jobId} not found`);
+      }
+
+      const { attempts, max_attempts } = checkRes.rows[0];
+      const attemptsToUse = currentAttempts !== undefined ? currentAttempts : Number(attempts);
+      const isDeadLetter = attemptsToUse >= Number(max_attempts);
+      const newStatus: JobStatus = isDeadLetter ? 'DEAD_LETTER' : 'QUEUED';
+
+      const updateSql = isDeadLetter
+        ? `UPDATE background_jobs
+           SET status = 'DEAD_LETTER',
+               attempts = $3,
+               last_error = $2,
+               failed_at = NOW(),
+               updated_at = NOW()
+           WHERE id = $1
+           RETURNING *`
+        : `UPDATE background_jobs
+           SET status = 'QUEUED',
+               attempts = $3,
+               last_error = $2,
+               updated_at = NOW()
+           WHERE id = $1
+           RETURNING *`;
+
+      const updateRes = await pool.query(updateSql, [jobId, error, attemptsToUse]);
+      const job = formatJobRow(updateRes.rows[0]);
+      return { job, isDeadLetter };
+    } catch (err) {
+      if (isDev) {
+        const job = mockJobsMap.get(jobId);
+        if (!job) {
+          throw new Error(`Job ${jobId} not found in mock store`);
+        }
+        const attemptsToUse = currentAttempts !== undefined ? currentAttempts : job.attempts;
+        job.attempts = attemptsToUse;
+        const isDeadLetter = attemptsToUse >= job.max_attempts;
+        job.status = isDeadLetter ? 'DEAD_LETTER' : 'QUEUED';
+        job.last_error = error;
+        job.updated_at = new Date().toISOString();
+        if (isDeadLetter) {
+          job.failed_at = new Date().toISOString();
+        }
+        return { job: { ...job }, isDeadLetter };
+      }
+      throw err;
+    }
+  }
+
+  // Retrieve all jobs in the Dead Letter Queue.
+  async getDeadLetterJobs(): Promise<BackgroundJob[]> {
+    const isDev = isDevMode();
+
+    try {
+      const pool = this.getPool();
+      const res = await pool.query<BackgroundJob>(
+        "SELECT * FROM background_jobs WHERE status = 'DEAD_LETTER' ORDER BY failed_at DESC"
+      );
+      if (isDev && res.rows.length === 0) {
+        const list: BackgroundJob[] = [];
+        for (const job of mockJobsMap.values()) {
+          if (job.status === 'DEAD_LETTER') {
+            list.push({ ...job });
+          }
+        }
+        if (list.length > 0) return list;
+      }
+      return res.rows.map(formatJobRow);
+    } catch (err) {
+      if (isDev) {
+        const list: BackgroundJob[] = [];
+        for (const job of mockJobsMap.values()) {
+          if (job.status === 'DEAD_LETTER') {
+            list.push({ ...job });
+          }
+        }
+        return list;
+      }
+      throw err;
+    }
+  }
+
+  // Retrieve background jobs with optional status filter.
+  async getBackgroundJobs(status?: JobStatus): Promise<BackgroundJob[]> {
+    const isDev = isDevMode();
+
+    try {
+      const pool = this.getPool();
+      if (status) {
+        const res = await pool.query<BackgroundJob>(
+          'SELECT * FROM background_jobs WHERE status = $1 ORDER BY created_at DESC',
+          [status]
+        );
+        if (isDev && res.rows.length === 0) {
+          const list: BackgroundJob[] = [];
+          for (const job of mockJobsMap.values()) {
+            if (job.status === status) {
+              list.push({ ...job });
+            }
+          }
+          if (list.length > 0) return list;
+        }
+        return res.rows.map(formatJobRow);
+      }
+      const res = await pool.query<BackgroundJob>('SELECT * FROM background_jobs ORDER BY created_at DESC');
+      if (isDev && res.rows.length === 0) {
+        const list: BackgroundJob[] = [];
+        for (const job of mockJobsMap.values()) {
+          list.push({ ...job });
+        }
+        if (list.length > 0) return list;
+      }
+      return res.rows.map(formatJobRow);
+    } catch (err) {
+      if (isDev) {
+        const list: BackgroundJob[] = [];
+        for (const job of mockJobsMap.values()) {
+          if (!status || job.status === status) {
+            list.push({ ...job });
+          }
+        }
+        return list;
+      }
+      throw err;
+    }
+  }
+
+  // Bounce the queue: resets active/processing jobs and clears dead letter jobs.
+  async bounceJobQueue(): Promise<void> {
+    const isDev = isDevMode();
+
+    try {
+      const pool = this.getPool();
+      await pool.query(
+        "UPDATE background_jobs SET status = 'QUEUED', updated_at = NOW() WHERE status = 'PROCESSING'"
+      );
+      await pool.query("DELETE FROM background_jobs WHERE status = 'DEAD_LETTER'");
+      if (isDev) {
+        for (const [id, job] of mockJobsMap.entries()) {
+          if (job.status === 'PROCESSING') {
+            job.status = 'QUEUED';
+          } else if (job.status === 'DEAD_LETTER') {
+            mockJobsMap.delete(id);
+          }
+        }
+      }
+    } catch (err) {
+      if (isDev) {
+        for (const [id, job] of mockJobsMap.entries()) {
+          if (job.status === 'PROCESSING') {
+            job.status = 'QUEUED';
+          } else if (job.status === 'DEAD_LETTER') {
+            mockJobsMap.delete(id);
+          }
+        }
+        return;
+      }
+      throw err;
+    }
+  }
+
+  // Move dead letter jobs back into the active queue for reprocessing.
+  async reprocessDeadLetterJobs(): Promise<number> {
+    const isDev = isDevMode();
+
+    try {
+      const pool = this.getPool();
+      const res = await pool.query(
+        "UPDATE background_jobs SET status = 'QUEUED', attempts = 0, last_error = null, failed_at = null, updated_at = NOW() WHERE status = 'DEAD_LETTER' RETURNING id"
+      );
+      let count = res.rowCount || 0;
+      if (isDev) {
+        for (const job of mockJobsMap.values()) {
+          if (job.status === 'DEAD_LETTER') {
+            job.status = 'QUEUED';
+            job.attempts = 0;
+            job.last_error = null;
+            job.failed_at = null;
+            job.updated_at = new Date().toISOString();
+            count += 1;
+          }
+        }
+      }
+      return count;
+    } catch (err) {
+      if (isDev) {
+        let count = 0;
+        for (const job of mockJobsMap.values()) {
+          if (job.status === 'DEAD_LETTER') {
+            job.status = 'QUEUED';
+            job.attempts = 0;
+            job.last_error = null;
+            job.failed_at = null;
+            job.updated_at = new Date().toISOString();
+            count += 1;
+          }
+        }
+        return count;
       }
       throw err;
     }

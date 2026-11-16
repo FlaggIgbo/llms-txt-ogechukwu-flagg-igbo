@@ -5,6 +5,9 @@ import {
   cleanProjectTitle,
   formatLlmsTxt,
   getInitialIntervalForCategory,
+  validateLlmsTxt,
+  validateLlmsFullTxt,
+  assertValidLlmsFiles,
 } from './llmsGenerator.js';
 import { computeNextCadence } from './cadenceCalculator.js';
 import type { ScrapedPage } from './scraper.js';
@@ -84,6 +87,16 @@ test('generateLlmsTxtFiles: builds compliant files and infers siteCategory', asy
   };
 
   const { llmsTxt, llmsFullTxt, siteCategory } = await generateLlmsTxtFiles(mockScrapedPage);
+
+  // Assert generated files pass strict validation.
+  assertValidLlmsFiles(llmsTxt, llmsFullTxt);
+  const txtValidation = validateLlmsTxt(llmsTxt);
+  assert.equal(txtValidation.valid, true);
+  assert.equal(txtValidation.errors.length, 0);
+
+  const fullTxtValidation = validateLlmsFullTxt(llmsFullTxt);
+  assert.equal(fullTxtValidation.valid, true);
+  assert.equal(fullTxtValidation.errors.length, 0);
 
   assert.ok(llmsTxt.startsWith('# Example Project\n\n> An open-source library for automated testing.'));
   assert.ok(llmsTxt.includes('## Docs'));

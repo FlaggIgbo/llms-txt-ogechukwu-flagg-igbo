@@ -7,18 +7,21 @@ CREATE TYPE entry_status AS ENUM ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'
 CREATE TABLE IF NOT EXISTS site_entries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   website_name TEXT NOT NULL DEFAULT '',
-  website_url TEXT NOT NULL UNIQUE,
+  website_url TEXT NOT NULL,
   website_short_description TEXT NOT NULL DEFAULT '',
   is_updated_latest BOOLEAN NOT NULL DEFAULT FALSE,
   llms_txt_storage TEXT,
   llms_full_txt_storage TEXT,
   status entry_status NOT NULL DEFAULT 'PENDING',
+  error_message TEXT,
+  is_scheduled_update BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Lookup and search indexes.
 CREATE INDEX IF NOT EXISTS idx_site_entries_website_url ON site_entries (website_url);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_site_entries_completed_url ON site_entries (website_url) WHERE status = 'COMPLETED';
 CREATE INDEX IF NOT EXISTS idx_site_entries_is_updated_latest ON site_entries (is_updated_latest);
 CREATE INDEX IF NOT EXISTS idx_site_entries_search ON site_entries USING gin (
   to_tsvector('english', coalesce(website_name, '') || ' ' || coalesce(website_short_description, '') || ' ' || coalesce(website_url, ''))

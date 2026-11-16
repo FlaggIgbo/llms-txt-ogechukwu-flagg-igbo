@@ -133,6 +133,10 @@ export function DirectoryTable({
   loading = false,
   error = null,
 }: DirectoryTableProps) {
+  if (error) {
+    return null;
+  }
+
   // Table body content.
   function renderRows() {
     if (loading && entries.length === 0) {
@@ -146,7 +150,6 @@ export function DirectoryTable({
     }
 
     if (entries.length === 0) {
-      if (error) return null;
       return (
         <tr>
           <td colSpan={4} className="table-empty-cell">
