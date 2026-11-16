@@ -1,5 +1,27 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { searchService } from '../services/searchService.js';
+import { logError } from '../services/logger.js';
 
-export async function handleSearch(_req: IncomingMessage, _res: ServerResponse): Promise<void> {
-  throw new Error('Not implemented');
+export async function handleSearch(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  try {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const q = url.searchParams.get('q') ?? '';
+    const limit = Number(url.searchParams.get('limit') ?? '50');
+    const offset = Number(url.searchParams.get('offset') ?? '0');
+
+    const result = await searchService.searchEntries({ q, limit, offset });
+
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+    });
+    res.end(JSON.stringify(result));
+  } catch (error) {
+    logError(error, { endpoint: 'GET /search' });
+    res.writeHead(500, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+    });
+    res.end(JSON.stringify({ error: 'Search failed', entries: [], total: 0 }));
+  }
 }

@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS site_entries (
 
 CREATE INDEX IF NOT EXISTS idx_site_entries_website_url ON site_entries (website_url);
 CREATE INDEX IF NOT EXISTS idx_site_entries_is_updated_latest ON site_entries (is_updated_latest);
+CREATE INDEX IF NOT EXISTS idx_site_entries_search ON site_entries USING gin (
+  to_tsvector('english', coalesce(website_name, '') || ' ' || coalesce(website_short_description, '') || ' ' || coalesce(website_url, ''))
+);
 
 -- Initial seed data for development environment (upserted on startup)
 INSERT INTO site_entries (

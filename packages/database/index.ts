@@ -149,6 +149,72 @@ export class DatabaseClient {
     }
   }
 
+  async searchEntries(
+    query: string,
+    limit = 50,
+    offset = 0
+  ): Promise<{ entries: SiteEntry[]; total: number }> {
+    const isDev = process.env.NODE_ENV !== 'production' || connectionString.includes('localhost');
+    const q = query.trim();
+
+    if (!q) {
+      const all = await this.listEntries();
+      return {
+        entries: all.slice(offset, offset + limit),
+        total: all.length,
+      };
+    }
+
+    if (isDev && !this.hasEnsuredSeed) {
+      await this.ensureDevelopmentSeed();
+    }
+
+    try {
+      const pool = this.getPool();
+      // Built-in PostgreSQL Full-Text Search with ranking and substring fallback
+      const sql = `
+        SELECT id, website_name, website_url, website_short_description,
+               is_updated_latest, llms_txt_storage, llms_full_txt_storage,
+               status, created_at, updated_at,
+               ts_rank(
+                 to_tsvector('english', coalesce(website_name, '') || ' ' || coalesce(website_short_description, '') || ' ' || coalesce(website_url, '')),
+                 plainto_tsquery('english', $1)
+               ) as rank,
+               count(*) OVER() AS full_count
+        FROM site_entries
+        WHERE to_tsvector('english', coalesce(website_name, '') || ' ' || coalesce(website_short_description, '') || ' ' || coalesce(website_url, '')) @@ plainto_tsquery('english', $1)
+           OR website_name ILIKE ('%' || $1 || '%')
+           OR website_short_description ILIKE ('%' || $1 || '%')
+           OR website_url ILIKE ('%' || $1 || '%')
+        ORDER BY rank DESC, updated_at DESC
+        LIMIT $2 OFFSET $3
+      `;
+
+      const result = await pool.query(sql, [q, limit, offset]);
+      const total = result.rows.length > 0 ? Number(result.rows[0].full_count) : 0;
+
+      return {
+        entries: result.rows.map(formatRow),
+        total,
+      };
+    } catch (err) {
+      if (isDev) {
+        const lowerQ = q.toLowerCase();
+        const matches = MOCK_SEED_ENTRIES.filter(
+          (e) =>
+            (e.website_name ?? '').toLowerCase().includes(lowerQ) ||
+            (e.website_short_description ?? '').toLowerCase().includes(lowerQ) ||
+            e.website_url.toLowerCase().includes(lowerQ)
+        );
+        return {
+          entries: matches.slice(offset, offset + limit),
+          total: matches.length,
+        };
+      }
+      throw err;
+    }
+  }
+
   async getEntryById(id: string): Promise<SiteEntry | null> {
     const pool = this.getPool();
     const result = await pool.query<SiteEntry>('SELECT * FROM site_entries WHERE id = $1', [id]);
