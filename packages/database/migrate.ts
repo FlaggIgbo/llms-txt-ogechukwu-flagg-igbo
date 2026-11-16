@@ -1,0 +1,46 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import pg from 'pg';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Run all SQL migration files in numerical order using node-postgres.
+export async function runMigrations(): Promise<void> {
+  const connectionString =
+    process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/llmstxt_directory';
+
+  console.log('[Migrate] Connecting to database...');
+  const pool = new pg.Pool({ connectionString });
+
+  try {
+    const client = await pool.connect();
+    try {
+      const migrationsDir = path.join(__dirname, 'migrations');
+      const files = await fs.readdir(migrationsDir);
+      const sqlFiles = files.filter((f) => f.endsWith('.sql')).sort();
+
+      console.log(`[Migrate] Found ${sqlFiles.length} migration file(s). Running migrations...`);
+
+      for (const file of sqlFiles) {
+        const filePath = path.join(migrationsDir, file);
+        const sql = await fs.readFile(filePath, 'utf-8');
+        console.log(`[Migrate] Applying ${file}...`);
+        await client.query(sql);
+      }
+
+      console.log('✅ [Migrate] All migrations applied successfully!');
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('❌ [Migrate] Migration failed:', err);
+    process.exit(1);
+  } finally {
+    await pool.end();
+  }
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  runMigrations();
+}

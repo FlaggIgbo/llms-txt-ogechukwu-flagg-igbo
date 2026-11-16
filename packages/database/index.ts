@@ -1064,4 +1064,3 @@ export class DatabaseClient {
 }
 
 export const db = new DatabaseClient();
-export { prisma, PrismaClient } from './prisma.js';
