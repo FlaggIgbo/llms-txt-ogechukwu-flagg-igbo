@@ -10,8 +10,12 @@ export async function runMigrations(): Promise<void> {
   const connectionString =
     process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/llmstxt_directory';
 
-  console.log('[Migrate] Connecting to database...');
-  const pool = new pg.Pool({ connectionString });
+  const isRemote = !connectionString.includes('localhost') && !connectionString.includes('127.0.0.1');
+  console.log(`[Migrate] Connecting to database (SSL: ${isRemote})...`);
+  const pool = new pg.Pool({
+    connectionString,
+    ssl: isRemote ? { rejectUnauthorized: false } : undefined,
+  });
 
   try {
     const client = await pool.connect();

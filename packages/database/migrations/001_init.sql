@@ -88,7 +88,7 @@ INSERT INTO site_entries (
     '2026-11-05T16:20:00.000Z',
     '2026-11-15T19:00:00.000Z'
   )
-ON CONFLICT (website_url) DO UPDATE SET
+ON CONFLICT (id) DO UPDATE SET
   website_name = EXCLUDED.website_name,
   website_short_description = EXCLUDED.website_short_description,
   is_updated_latest = EXCLUDED.is_updated_latest,

@@ -158,7 +158,11 @@ export class DatabaseClient {
   // Create or reuse the DB connection pool.
   private getPool(): pg.Pool {
     if (!this.pool) {
-      this.pool = new pg.Pool({ connectionString });
+      const isRemote = !connectionString.includes('localhost') && !connectionString.includes('127.0.0.1');
+      this.pool = new pg.Pool({
+        connectionString,
+        ssl: isRemote ? { rejectUnauthorized: false } : undefined,
+      });
     }
     return this.pool;
   }
