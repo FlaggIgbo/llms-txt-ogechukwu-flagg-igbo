@@ -1,26 +1,34 @@
 terraform {
   required_version = ">= 1.5.0"
   required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 4.0"
     }
   }
 }
 
-provider "aws" {
-  region = var.aws_region
+provider "cloudflare" {
+  api_token = var.cloudflare_api_token
 }
 
-variable "aws_region" {
-  type    = string
-  default = "us-east-1"
+variable "cloudflare_account_id" {
+  type        = string
+  description = "Cloudflare Account ID"
 }
 
-resource "aws_s3_bucket" "llms_txt_storage" {
-  bucket = "llmstxt-files-bucket"
+variable "cloudflare_api_token" {
+  type        = string
+  description = "Cloudflare API Token with R2 permissions"
+  sensitive   = true
 }
 
-resource "aws_s3_bucket" "update_logs" {
-  bucket = "llmstxt-update-logs-bucket"
+resource "cloudflare_r2_bucket" "llms_txt_storage" {
+  account_id = var.cloudflare_account_id
+  name       = "llmstxt-files-bucket"
+}
+
+resource "cloudflare_r2_bucket" "update_logs" {
+  account_id = var.cloudflare_account_id
+  name       = "llmstxt-update-logs-bucket"
 }

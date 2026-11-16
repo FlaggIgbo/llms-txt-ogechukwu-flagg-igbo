@@ -18,7 +18,7 @@ function trimTrailingSlashes(url: string): string {
 }
 
 // Get the llms.txt URL for an entry.
-function resolveLlmTxtUrl(entry: SiteEntry): string {
+export function resolveLlmTxtUrl(entry: SiteEntry): string {
   if (entry.llm_txt) {
     return entry.llm_txt;
   }
@@ -28,6 +28,19 @@ function resolveLlmTxtUrl(entry: SiteEntry): string {
     return storageUrl;
   }
 
+  // Handle Cloudflare R2 paths.
+  if (storageUrl.startsWith('r2://')) {
+    const publicBase = (import.meta as any).env?.VITE_R2_PUBLIC_URL || '';
+    if (publicBase) {
+      const pathWithoutPrefix = storageUrl.slice(5);
+      const parts = pathWithoutPrefix.split('/');
+      const key = parts.slice(1).join('/');
+      const cleanBase = publicBase.endsWith('/') ? publicBase.slice(0, -1) : publicBase;
+      return `${cleanBase}/${key}`;
+    }
+  }
+
+  // Fallback to website URL with /llms.txt.
   if (entry.website_url) {
     return `${trimTrailingSlashes(entry.website_url)}/llms.txt`;
   }
@@ -58,9 +71,19 @@ function renderEntryRow(entry: SiteEntry) {
 
   return (
     <tr key={entry.id} className="table-row">
-      {/* Website name and link */}
+      {/* Website name linking to the .txt file in Cloudflare R2 */}
       <td className="cell-name">
-        {entry.website_url ? (
+        {llmTxtUrl ? (
+          <a
+            href={llmTxtUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="site-link"
+            title={`Open .txt file: ${llmTxtUrl}`}
+          >
+            {displayName}
+          </a>
+        ) : entry.website_url ? (
           <a
             href={entry.website_url}
             target="_blank"
@@ -110,7 +133,7 @@ export function DirectoryTable({
   loading = false,
   error = null,
 }: DirectoryTableProps) {
-  // Decide what to show in the table body.
+  // Table body content.
   function renderRows() {
     if (loading && entries.length === 0) {
       return (

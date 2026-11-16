@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { useEntries, matchesSearch, MOCK_SEED_ENTRIES } from './useEntries.js';
+import { resolveLlmTxtUrl } from '../components/DirectoryTable.js';
+import { DirectoryCard } from '../components/DirectoryCard.js';
 
 describe('useEntries and MOCK_SEED_ENTRIES', () => {
   describe('MOCK_SEED_ENTRIES', () => {
@@ -66,6 +68,27 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
 
       assert.equal(filtered.length, 1);
       assert.equal(filtered[0].website_name, 'Anthropic Docs');
+    });
+  });
+
+  describe('resolveLlmTxtUrl and DirectoryCard', () => {
+    it('resolves stored txt URLs from entry.llms_txt_storage', () => {
+      const entry = {
+        ...MOCK_SEED_ENTRIES[0],
+        llm_txt: null,
+        llms_txt_storage: 'https://cdn.example.com/llms.txt',
+      };
+      assert.equal(resolveLlmTxtUrl(entry), 'https://cdn.example.com/llms.txt');
+    });
+
+    it('renders DirectoryCard with hyperlinked URL pointing to .txt file', () => {
+      const entry = {
+        ...MOCK_SEED_ENTRIES[0],
+        llm_txt: 'https://r2.example.com/fastapi/llms.txt',
+      };
+      const html = renderToString(React.createElement(DirectoryCard, { entry }));
+      assert.ok(html.includes('href="https://r2.example.com/fastapi/llms.txt"'));
+      assert.ok(html.includes('FastAPI'));
     });
   });
 });

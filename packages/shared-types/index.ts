@@ -50,6 +50,6 @@ export interface UpdateLog {
   checked_at: string;
   was_stale: boolean;
   regenerated: boolean;
-  s3_log_key: string;
+  r2_log_key: string;
   error_message?: string;
 }
