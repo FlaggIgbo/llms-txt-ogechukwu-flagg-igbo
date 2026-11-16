@@ -18,12 +18,20 @@
     "test": "npm run test --workspaces --if-present",
     "prepare": "git config core.hooksPath .githooks",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
-    "infra:down": "docker compose -f infra/docker-compose.yml down"
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "db:generate": "npm run db:generate --workspace=@llmstxt/database",
+    "db:push": "npm run db:push --workspace=@llmstxt/database",
+    "db:studio": "npm run db:studio --workspace=@llmstxt/database",
+    "db:migrate": "npm run db:migrate --workspace=@llmstxt/database"
   },
   "devDependencies": {
+    "prisma": "^6.19.3",
     "typescript": "^5.6.3"
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3"
   }
 }

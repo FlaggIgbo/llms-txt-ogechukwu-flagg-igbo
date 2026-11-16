@@ -64,7 +64,8 @@ export const MOCK_SEED_ENTRIES: SiteEntry[] = [
 ];
 
 const env = (import.meta as any).env || {};
-const API_BASE = env.VITE_API_URL || 'http://localhost:4000';
+const rawApiBase = env.VITE_API_URL || env.VITE_API_BASE_URL || 'http://localhost:4000';
+const API_BASE = rawApiBase.startsWith('http') ? rawApiBase : `https://${rawApiBase}`;
 
 // Check if an entry matches the search text.
 export function matchesSearch(item: SiteEntry, query: string): boolean {

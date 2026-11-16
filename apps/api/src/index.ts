@@ -7,7 +7,7 @@ import { initSentry, logInfo } from './services/logger.js';
 
 initSentry();
 
-const PORT = Number(process.env.API_PORT || 4000);
+const PORT = Number(process.env.PORT || process.env.API_PORT || 4000);
 
 // Start the HTTP server.
 export function startApiServer(port: number = PORT): void {
