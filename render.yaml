@@ -5,10 +5,10 @@ databases:
 
 services:
   # 1. Frontend Web App (React / Vite Static Site)
+  # Note: Static sites on Render are served via global CDN and do not specify a 'plan'
   - type: web
     name: llmstxt-web
-    runtime: static
-    plan: free
+    env: static
     buildCommand: npm install && npm run build --workspace=@llmstxt/web
     staticPublishPath: apps/web/dist
     envVars:
@@ -25,7 +25,7 @@ services:
   # 2. Backend HTTP API Gateway
   - type: web
     name: llmstxt-api
-    runtime: node
+    env: node
     plan: free
     buildCommand: npm install
     startCommand: npx tsx apps/api/src/index.ts
@@ -39,10 +39,10 @@ services:
       - key: LOCAL_STORAGE_DIR
         value: /tmp/storage
 
-  # 3. Scraping & LLMs.txt Generation Worker
+  # 3. Scraping, LLMs.txt Generation & Cadence Worker
   - type: worker
     name: llmstxt-worker
-    runtime: node
+    env: node
     plan: starter
     buildCommand: npm install && npx playwright install --with-deps chromium
     startCommand: npx tsx apps/worker/src/index.ts
@@ -57,17 +57,3 @@ services:
         value: local
       - key: LOCAL_STORAGE_DIR
         value: /tmp/storage
-
-  # 4. Scheduled Cadence Cron Updater
-  - type: worker
-    name: llmstxt-cron-updater
-    runtime: node
-    plan: free
-    buildCommand: npm install
-    startCommand: npx tsx apps/cron-updater/src/index.ts
-    envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: llmstxt-postgres
-          property: connectionString
-
