@@ -1,9 +1,22 @@
+import { logWarn } from '@llmstxt/logger';
 import type { ScrapedPage } from './scraper.js';
+
+// Known category types for a website.
+export const KNOWN_CATEGORIES = ['api_docs', 'blog', 'marketing'] as const;
+export type SiteCategory = (typeof KNOWN_CATEGORIES)[number];
+
+// Get default check interval for a site category.
+export function getInitialIntervalForCategory(category: SiteCategory): number {
+  if (category === 'blog') return 12;
+  if (category === 'marketing') return 72;
+  return 168; // api_docs default
+}
 
 // Generated llms.txt and llms-full.txt file contents.
 export interface GeneratedLlmsFiles {
   llmsTxt: string;
   llmsFullTxt: string;
+  siteCategory: SiteCategory;
 }
 
 // A link inside a categorized section.
@@ -25,6 +38,7 @@ export interface CategorizationResult {
   siteDescription: string;
   preamble?: string;
   sections: CategorizedSection[];
+  siteCategory?: SiteCategory;
 }
 
 // Remove tagline suffixes (e.g. "MyTool | Fast Library" -> "MyTool").
@@ -111,6 +125,15 @@ function categorizeWithFallback(scraped: ScrapedPage): CategorizationResult {
     sections.push({ name, links });
   }
 
+  const lowerUrl = scraped.url.toLowerCase();
+  const lowerTitle = scraped.title.toLowerCase();
+  let siteCategory: SiteCategory = 'api_docs';
+  if (lowerUrl.includes('blog') || lowerTitle.includes('blog') || lowerUrl.includes('changelog')) {
+    siteCategory = 'blog';
+  } else if (!lowerUrl.includes('doc') && !lowerTitle.includes('doc') && !lowerUrl.includes('api')) {
+    siteCategory = 'marketing';
+  }
+
   const siteDescription =
     scraped.description ||
     `Official technical documentation and developer guides for ${cleanProjectTitle(scraped.title)}.`;
@@ -119,6 +142,7 @@ function categorizeWithFallback(scraped: ScrapedPage): CategorizationResult {
     title: cleanProjectTitle(scraped.title),
     siteDescription,
     sections,
+    siteCategory,
   };
 }
 
@@ -154,7 +178,8 @@ Specification Rules:
 2. "siteDescription": A concise 1-2 sentence summary of what the project/site is and who it is for.
 3. "preamble": Optional 1-sentence note for LLMs on navigating the docs.
 4. "sections": Group links into clear H2 categories (e.g. "Docs", "API Reference", "Guides", or product areas).
-5. For each link, provide:
+5. "siteCategory": Classify the website type as exactly one of: "api_docs", "blog", or "marketing".
+6. For each link, provide:
    - "title": Clean human-readable title.
    - "url": Target URL.
    - "description": A concise, informative 1-sentence explanation of what the resource contains.
@@ -164,6 +189,7 @@ Return ONLY a JSON object matching this schema:
   "title": "Project Name",
   "siteDescription": "1-2 sentence site summary",
   "preamble": "Optional notes or instructions",
+  "siteCategory": "api_docs",
   "sections": [
     {
       "name": "Docs",
@@ -206,17 +232,32 @@ Return ONLY a JSON object matching this schema:
     const parsed = JSON.parse(responseText) as CategorizationResult;
 
     if (parsed && Array.isArray(parsed.sections)) {
+      // Validate category; log warning if LLM returns an unknown category.
+      let category: SiteCategory = 'api_docs';
+      if (parsed.siteCategory) {
+        const normalized = String(parsed.siteCategory).toLowerCase().trim();
+        if ((KNOWN_CATEGORIES as readonly string[]).includes(normalized)) {
+          category = normalized as SiteCategory;
+        } else {
+          logWarn(
+            `[Warning] Unknown site category returned by LLM: "${parsed.siteCategory}". Defaulting to "api_docs".`
+          );
+          category = 'api_docs';
+        }
+      }
+
       return {
         title: parsed.title ? cleanProjectTitle(parsed.title) : cleanProjectTitle(scraped.title),
         siteDescription: parsed.siteDescription || scraped.description,
         preamble: parsed.preamble,
         sections: parsed.sections,
+        siteCategory: category,
       };
     }
 
     return categorizeWithFallback(scraped);
   } catch (error) {
-    console.warn('Gemini categorization failed, falling back to rule-based parser:', error);
+    logWarn('Gemini categorization failed, falling back to rule-based parser:', error);
     return categorizeWithFallback(scraped);
   }
 }
@@ -315,6 +356,7 @@ export async function generateLlmsTxtFiles(
       llmsFullTxt:
         scraped.officialLlmsFullTxt ||
         formatLlmsFullTxt(scraped.title, scraped.description, scraped),
+      siteCategory: 'api_docs',
     };
   }
 
@@ -339,5 +381,6 @@ export async function generateLlmsTxtFiles(
   return {
     llmsTxt,
     llmsFullTxt,
+    siteCategory: categorized.siteCategory || 'api_docs',
   };
 }

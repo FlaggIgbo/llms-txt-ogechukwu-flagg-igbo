@@ -15,16 +15,35 @@ enum EntryStatus {
 }
 
 model SiteEntry {
-  id                        String      @id @default(uuid())
-  website_name              String      @default("")
-  website_url               String      @unique
-  website_short_description String      @default("")
-  is_updated_latest         Boolean     @default(false)
+  id                        String       @id @default(uuid())
+  website_name              String       @default("")
+  website_url               String       @unique
+  website_short_description String       @default("")
+  is_updated_latest         Boolean      @default(false)
   llms_txt_storage          String?
   llms_full_txt_storage     String?
-  status                    EntryStatus @default(PENDING)
-  created_at                DateTime    @default(now())
-  updated_at                DateTime    @updatedAt
+  status                    EntryStatus  @default(PENDING)
+  created_at                DateTime     @default(now())
+  updated_at                DateTime     @updatedAt
+  cadence                   SiteCadence?
 
   @@map("site_entries")
+}
+
+model SiteCadence {
+  site_id              String    @id
+  url                  String
+  site_category        String?
+  check_interval_hours Int       @default(24)
+  unchanged_streak     Int       @default(0)
+  etag                 String?
+  last_modified        String?
+  last_content_hash    String?
+  last_checked_at      DateTime?
+  next_check_at        DateTime  @default(now())
+  status               String    @default("idle")
+
+  entry                SiteEntry @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@map("site_cadence")
 }
