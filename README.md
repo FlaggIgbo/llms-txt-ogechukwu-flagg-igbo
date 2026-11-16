@@ -25,7 +25,7 @@ llms-txt-ogechukwu-flagg-igbo/
 │   │   ├── src/
 │   │   │   ├── routes/
 │   │   │   │   ├── entries.ts      # GET /entries (DB Read), POST /entries (Push to Queue)
-│   │   │   │   └── search.ts       # GET /search (Elasticsearch / DB lookup)
+│   │   │   │   └── search.ts       # GET /search (PostgreSQL Full-Text Search lookup)
 │   │   │   ├── services/
 │   │   │   │   ├── searchService.ts
 │   │   │   │   └── storageService.ts # Presigned URLs or S3 file retrieval
@@ -60,9 +60,9 @@ llms-txt-ogechukwu-flagg-igbo/
 │   └── shared-types/               # TypeScript Interfaces & Validation
 │       └── index.ts                # Shared DTOs (SiteEntry, SearchQuery, UpdateLog)
 ├── infra/                          # Infrastructure & Local Dev Orchestration
-│   ├── docker-compose.yml          # Spins up Postgres, Elasticsearch, Redis, & LocalStack (S3)
+│   ├── docker-compose.yml          # Spins up Postgres, Redis, & LocalStack (S3)
 │   └── terraform/                  # Cloud definitions for S3 buckets, RDS, and ECS/Lambda
-├── .env.example                    # Template for DB URLs, S3 bucket names, Elasticsearch host
+├── .env.example                    # Template for DB URLs, S3 bucket names, Redis host
 ├── package.json                    # Workspace root
 └── README.md                       # Architecture overview and local setup instructions
 ```
@@ -74,7 +74,7 @@ llms-txt-ogechukwu-flagg-igbo/
    cp .env.example .env
    ```
 
-2. **Start local storage & search primitives (Postgres, Redis, Elasticsearch, LocalStack S3):**
+2. **Start local storage & search primitives (Postgres, Redis, LocalStack S3):**
    ```bash
    npm run infra:up
    ```
