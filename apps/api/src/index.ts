@@ -1,4 +1,6 @@
 import http from 'node:http';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { handleGetEntries, handlePostEntry } from './routes/entries.js';
 import { handleSearch } from './routes/search.js';
 import { initSentry, logInfo } from './services/logger.js';
@@ -35,6 +37,35 @@ export function startApiServer(port: number = PORT): void {
     }
     if (pathname === '/search' && req.method === 'GET') {
       return handleSearch(req, res);
+    }
+
+    // Serve local files in development.
+    if (pathname.startsWith('/storage/') && req.method === 'GET') {
+      const relPath = pathname.slice('/storage/'.length);
+      const storageDir = path.resolve(process.env.LOCAL_STORAGE_DIR || './data/storage');
+      const safePath = path.normalize(path.join(storageDir, relPath));
+
+      // Block paths outside the storage folder.
+      if (!safePath.startsWith(storageDir)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Forbidden' }));
+        return;
+      }
+
+      // Send file contents.
+      try {
+        const content = await fs.readFile(safePath, 'utf-8');
+        res.writeHead(200, {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Access-Control-Allow-Origin': '*',
+        });
+        res.end(content);
+        return;
+      } catch {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'File not found' }));
+        return;
+      }
     }
 
     // Default health check response.
