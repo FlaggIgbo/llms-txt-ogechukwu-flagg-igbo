@@ -57,7 +57,10 @@ export function DirectoryCard({ entry }: DirectoryCardProps): React.ReactElement
             className="llm-txt-link"
             title="View .txt file"
           >
-            llms.txt <span className="external-arrow">↗</span>
+            {llmTxtUrl.includes('llms-full.txt') || llmTxtUrl.includes('llms-full/txt')
+              ? 'llms-full.txt'
+              : 'llms.txt'}{' '}
+            <span className="external-arrow">↗</span>
           </a>
         )}
         {entry.updated_at && (

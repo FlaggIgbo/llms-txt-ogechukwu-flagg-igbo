@@ -109,6 +109,64 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
       assert.equal(resolveLlmTxtUrl(entry), 'https://cdn.example.com/llms.txt');
     });
 
+    it('returns llms-full.txt file for generated websites', () => {
+      const generatedEntry = {
+        id: '12345678-1234-1234-1234-123456789abc',
+        website_url: 'https://generated-sample.com',
+        website_name: 'Generated Sample',
+        website_short_description: 'A generated sample site',
+        is_updated_latest: true,
+        llms_txt_storage: 'http://localhost:4000/storage/generated-sample.com/llms.txt',
+        llms_full_txt_storage: 'http://localhost:4000/storage/generated-sample.com/llms-full.txt',
+        status: EntryStatus.COMPLETED,
+        created_at: '2026-11-01T10:00:00.000Z',
+        updated_at: '2026-11-14T14:22:10.000Z',
+      };
+      assert.equal(
+        resolveLlmTxtUrl(generatedEntry),
+        'http://localhost:4000/storage/generated-sample.com/llms-full.txt'
+      );
+    });
+
+    it('falls back to normal llms.txt if something is wrong with llms.txt full for generated websites', () => {
+      const brokenFullEntry = {
+        id: '12345678-1234-1234-1234-123456789abc',
+        website_url: 'https://generated-sample.com',
+        website_name: 'Generated Sample',
+        website_short_description: 'A generated sample site',
+        is_updated_latest: true,
+        llms_txt_storage: 'http://localhost:4000/storage/generated-sample.com/llms.txt',
+        llms_full_txt_storage: null,
+        status: EntryStatus.COMPLETED,
+        created_at: '2026-11-01T10:00:00.000Z',
+        updated_at: '2026-11-14T14:22:10.000Z',
+      };
+      assert.equal(
+        resolveLlmTxtUrl(brokenFullEntry),
+        'http://localhost:4000/storage/generated-sample.com/llms.txt'
+      );
+
+      const emptyFullEntry = {
+        ...brokenFullEntry,
+        llms_full_txt_storage: '   ',
+      };
+      assert.equal(
+        resolveLlmTxtUrl(emptyFullEntry),
+        'http://localhost:4000/storage/generated-sample.com/llms.txt'
+      );
+    });
+
+    it('returns llms.txt for official websites where the site already has one', () => {
+      // FastAPI has an official llms.txt and llms-full.txt
+      const officialEntry = {
+        ...MOCK_SEED_ENTRIES[0],
+      };
+      assert.equal(
+        resolveLlmTxtUrl(officialEntry),
+        'https://fastapi.tiangolo.com/llms.txt'
+      );
+    });
+
     it('renders DirectoryCard with hyperlinked URL pointing to .txt file', () => {
       const entry = {
         ...MOCK_SEED_ENTRIES[0],
@@ -117,6 +175,17 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
       const html = renderToString(React.createElement(DirectoryCard, { entry }));
       assert.ok(html.includes('href="https://r2.example.com/fastapi/llms.txt"'));
       assert.ok(html.includes('FastAPI'));
+      assert.ok(html.includes('llms.txt'));
+    });
+
+    it('renders DirectoryCard with llms-full.txt label when URL points to llms-full.txt', () => {
+      const entry = {
+        ...MOCK_SEED_ENTRIES[0],
+        llm_txt: 'http://localhost:4000/storage/fastapi/llms-full.txt',
+      };
+      const html = renderToString(React.createElement(DirectoryCard, { entry }));
+      assert.ok(html.includes('href="http://localhost:4000/storage/fastapi/llms-full.txt"'));
+      assert.ok(html.includes('llms-full.txt'));
     });
   });
 

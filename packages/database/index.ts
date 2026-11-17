@@ -206,10 +206,12 @@ export class DatabaseClient {
     const pool = this.getPool();
 
     if (!q) {
-      const countRes = await pool.query<{ count: string }>('SELECT COUNT(*) as count FROM site_entries');
+      const countRes = await pool.query<{ count: string }>(
+        "SELECT COUNT(*) as count FROM site_entries WHERE status = 'COMPLETED'"
+      );
       const total = Number(countRes.rows[0]?.count || 0);
       const result = await pool.query<SiteEntry>(
-        'SELECT * FROM site_entries ORDER BY updated_at DESC LIMIT $1 OFFSET $2',
+        "SELECT * FROM site_entries WHERE status = 'COMPLETED' ORDER BY updated_at DESC LIMIT $1 OFFSET $2",
         [limit, offset]
       );
       return {

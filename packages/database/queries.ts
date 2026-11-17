@@ -163,10 +163,13 @@ export const SEARCH_ENTRIES_FTS_SQL = `
          ) as rank,
          count(*) OVER() AS full_count
   FROM site_entries
-  WHERE to_tsvector('english', coalesce(website_name, '') || ' ' || coalesce(website_short_description, '') || ' ' || coalesce(website_url, '')) @@ plainto_tsquery('english', $1)
-     OR website_name ILIKE ('%' || $1 || '%')
-     OR website_short_description ILIKE ('%' || $1 || '%')
-     OR website_url ILIKE ('%' || $1 || '%')
+  WHERE status = 'COMPLETED'
+    AND (
+      to_tsvector('english', coalesce(website_name, '') || ' ' || coalesce(website_short_description, '') || ' ' || coalesce(website_url, '')) @@ plainto_tsquery('english', $1)
+      OR website_name ILIKE ('%' || $1 || '%')
+      OR website_short_description ILIKE ('%' || $1 || '%')
+      OR website_url ILIKE ('%' || $1 || '%')
+    )
   ORDER BY rank DESC, updated_at DESC
   LIMIT $2 OFFSET $3
 `;

@@ -14,6 +14,7 @@ import {
   EntryStatus,
   ApiErrorCode,
   ApiErrorMessage,
+  isGeneratedEntry,
 } from '@llmstxt/shared-types';
 import { logError } from '../services/logger.js';
 import { storageService } from '../services/storageService.js';
@@ -74,9 +75,27 @@ export function formatEntryStorageUrls(entry: SiteEntry): SiteEntry {
 
   const defaultTxtUrl = `${cleanWebsiteUrl}/llms.txt`;
 
+  const isGenerated = isGeneratedEntry(entry);
+
+  // For websites where we generated llms (rather than the website already having one),
+  // return the llms-full.txt file instead of the llms.txt file on the home page.
+  // Fallback to normal llms.txt if something is wrong with llms.txt full.
+  let resolvedTxtUrl: string;
+  if (isGenerated) {
+    const isFullValid = Boolean(
+      fullDownloadUrl &&
+      fullDownloadUrl.trim().length > 0 &&
+      fullDownloadUrl.trim() !== 'null' &&
+      fullDownloadUrl.trim() !== 'undefined'
+    );
+    resolvedTxtUrl = isFullValid ? fullDownloadUrl! : (downloadUrl || entry.llm_txt || defaultTxtUrl);
+  } else {
+    resolvedTxtUrl = downloadUrl || entry.llm_txt || defaultTxtUrl;
+  }
+
   return {
     ...entry,
-    llm_txt: downloadUrl || entry.llm_txt || defaultTxtUrl,
+    llm_txt: resolvedTxtUrl,
     llms_txt_storage: downloadUrl || entry.llms_txt_storage,
     llms_full_txt_storage: fullDownloadUrl || entry.llms_full_txt_storage,
   };
@@ -177,12 +196,39 @@ export async function handlePostEntry(
       return;
     }
 
-    // Return 409 Conflict if URL already exists with COMPLETED status.
+    // Return 409 Conflict if URL already exists with COMPLETED, PENDING, or PROCESSING status.
     const existing = await db.getEntryByUrl(body.website_url);
-    if (existing && existing.status === EntryStatus.COMPLETED) {
-      sendJsonResponse(res, 409, {
-        error: ApiErrorMessage.DUPLICATE_URL,
-        code: ApiErrorCode.CONFLICT,
+    if (existing) {
+      if (
+        existing.status === EntryStatus.COMPLETED ||
+        existing.status === EntryStatus.PROCESSING ||
+        existing.status === EntryStatus.PENDING
+      ) {
+        sendJsonResponse(res, 409, {
+          error: ApiErrorMessage.DUPLICATE_URL,
+          code: ApiErrorCode.CONFLICT,
+        });
+        return;
+      }
+
+      // If previously failed, re-use existing entry instead of creating a duplicate row
+      await db.updateEntry(existing.id, {
+        status: EntryStatus.PENDING,
+        error_message: null,
+        error_code: null,
+      });
+
+      await generationQueue.enqueueGenerateJob({
+        entryId: existing.id,
+        websiteUrl: existing.website_url,
+        isScheduledUpdate: false,
+      });
+
+      recordIpSubmission(clientIp);
+
+      sendJsonResponse(res, 201, formatEntryStorageUrls({ ...existing, status: EntryStatus.PENDING }), {
+        'X-RateLimit-Limit': String(DAILY_ENTRY_LIMIT),
+        'X-RateLimit-Remaining': String(Math.max(0, rateCheck.remaining - 1)),
       });
       return;
     }

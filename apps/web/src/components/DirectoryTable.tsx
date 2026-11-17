@@ -1,4 +1,4 @@
-import type { SiteEntry } from '@llmstxt/shared-types';
+import { type SiteEntry, isGeneratedEntry } from '@llmstxt/shared-types';
 
 // Props for the directory table.
 export interface DirectoryTableProps {
@@ -16,13 +16,45 @@ function trimTrailingSlashes(url: string): string {
   return clean;
 }
 
-// Get the llms.txt URL for an entry.
+// Get the llms.txt or llms-full.txt URL for an entry.
 export function resolveLlmTxtUrl(entry: SiteEntry): string {
+  const isGenerated = isGeneratedEntry(entry);
+
+  if (isGenerated) {
+    // For websites where we generated llms (rather than the website already having one),
+    // return the llms-full.txt file instead of the llms.txt file on the home page.
+    const fullStorage = entry.llms_full_txt_storage?.trim() || '';
+    if (fullStorage && (fullStorage.startsWith('http://') || fullStorage.startsWith('https://'))) {
+      return fullStorage;
+    }
+
+    if (entry.llm_txt && (entry.llm_txt.includes('llms-full.txt') || entry.llm_txt.includes('llms-full/txt'))) {
+      return entry.llm_txt;
+    }
+
+    // Fallback to normal llms.txt if something is wrong with llms.txt full
+    if (entry.llm_txt) {
+      return entry.llm_txt;
+    }
+
+    const storageUrl = entry.llms_txt_storage?.trim() || '';
+    if (storageUrl.startsWith('http://') || storageUrl.startsWith('https://')) {
+      return storageUrl;
+    }
+
+    if (entry.website_url) {
+      return `${trimTrailingSlashes(entry.website_url)}/llms.txt`;
+    }
+
+    return '';
+  }
+
+  // Official site (website already had one)
   if (entry.llm_txt) {
     return entry.llm_txt;
   }
 
-  const storageUrl = entry.llms_txt_storage || '';
+  const storageUrl = entry.llms_txt_storage?.trim() || '';
   if (storageUrl.startsWith('http://') || storageUrl.startsWith('https://')) {
     return storageUrl;
   }
