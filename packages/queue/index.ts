@@ -44,6 +44,9 @@ export class GenerationQueue {
   private jobCounter = 0;
   private maxRetries = 3;
   private retryDelayMs = 100;
+  private dbPollingTimer: ReturnType<typeof setInterval> | null = null;
+  private isPollingDb = false;
+  private executionChain: Promise<void> = Promise.resolve();
 
   constructor(options?: { maxRetries?: number; retryDelayMs?: number }) {
     if (options?.maxRetries !== undefined) {
@@ -57,11 +60,13 @@ export class GenerationQueue {
   // Add a job to the queue and insert into Postgres background_jobs table.
   async enqueueGenerateJob(payload: GenerateJobPayload): Promise<{ jobId: string }> {
     let jobId = `job_${Date.now()}_${++this.jobCounter}`;
+    let persistedInDb = false;
 
     try {
       const dbJob = await db.createBackgroundJob(payload, this.maxRetries);
       if (dbJob?.id) {
         jobId = dbJob.id;
+        persistedInDb = true;
       }
     } catch (err) {
       logWarn(`[GenerationQueue] Database job creation fallback: ${err}`);
@@ -75,16 +80,90 @@ export class GenerationQueue {
       createdAt: new Date().toISOString(),
     };
 
+    // If database polling is active and the job was persisted in Postgres, let the DB poller claim and process it sequentially.
+    if (this.dbPollingTimer && persistedInDb && this.handlers.length > 0) {
+      setTimeout(() => {
+        void this.pollDatabaseQueue();
+      }, 0);
+      return { jobId };
+    }
+
     this.activeJobs.set(jobId, job);
 
-    // Dispatch job asynchronously with retry logic to registered consumers.
+    // Dispatch job sequentially with retry logic to registered consumers.
     for (const handler of this.handlers) {
-      setTimeout(() => {
-        void this.executeJobWithRetries(job, handler);
-      }, 0);
+      this.executionChain = this.executionChain
+        .then(() => this.executeJobWithRetries(job, handler))
+        .catch(() => {});
     }
 
     return { jobId };
+  }
+
+  // Start polling the PostgreSQL background_jobs table for QUEUED jobs using FOR UPDATE SKIP LOCKED.
+  startDatabasePolling(intervalMs: number = 2000): void {
+    if (this.dbPollingTimer) return;
+    void this.pollDatabaseQueue();
+    this.dbPollingTimer = setInterval(() => {
+      void this.pollDatabaseQueue();
+    }, intervalMs);
+  }
+
+  // Claim and process queued jobs from PostgreSQL sequentially (one at a time to prevent memory spikes).
+  async pollDatabaseQueue(): Promise<void> {
+    if (this.isPollingDb || this.handlers.length === 0) return;
+    this.isPollingDb = true;
+
+    try {
+      while (true) {
+        const claimed = await db.claimNextBackgroundJob();
+        if (!claimed) break;
+
+        const payload: GenerateJobPayload = {
+          entryId: claimed.entry_id,
+          websiteUrl: claimed.website_url,
+          isScheduledUpdate: claimed.is_scheduled_update,
+        };
+
+        const job: QueueJob = {
+          id: claimed.id,
+          payload,
+          attempts: claimed.attempts,
+          maxAttempts: claimed.max_attempts,
+          createdAt: claimed.created_at,
+        };
+
+        this.activeJobs.set(job.id, job);
+
+        try {
+          for (const handler of this.handlers) {
+            await handler(payload);
+          }
+          this.activeJobs.delete(job.id);
+          await db.completeBackgroundJob(claimed.id);
+        } catch (err: unknown) {
+          this.activeJobs.delete(job.id);
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          job.lastError = errorMsg;
+
+          const failResult = await db
+            .failBackgroundJob(claimed.id, errorMsg, claimed.attempts)
+            .catch(() => ({ isDeadLetter: claimed.attempts >= claimed.max_attempts }));
+
+          if (!failResult.isDeadLetter) {
+            logWarn(
+              `[GenerationQueue] DB Job ${claimed.id} failed attempt ${claimed.attempts}/${claimed.max_attempts} for ${claimed.website_url}: ${errorMsg}. Will retry...`
+            );
+          } else {
+            await this.moveToDeadLetterQueue(job, err);
+          }
+        }
+      }
+    } catch (err) {
+      logWarn(`[GenerationQueue] Error polling database queue: ${err}`);
+    } finally {
+      this.isPollingDb = false;
+    }
   }
 
   // Execute a job with up to maxRetries attempts, updating background_jobs table.

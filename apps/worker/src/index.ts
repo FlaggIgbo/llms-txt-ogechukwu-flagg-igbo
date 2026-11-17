@@ -22,10 +22,17 @@ async function pollScheduledSites(): Promise<void> {
   }
 }
 
+let workerStarted = false;
+
 // Entry point for the background worker.
 export function startWorker(): void {
+  if (workerStarted) return;
+  workerStarted = true;
   logInfo('[Worker] Starting background generation worker...');
   startGenerateConsumer();
+
+  // Poll PostgreSQL background_jobs table every 2 seconds for newly submitted sites.
+  generationQueue.startDatabasePolling(2000);
 
   // Run initial cadence check and poll every 5 minutes.
   pollScheduledSites();

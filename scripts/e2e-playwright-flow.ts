@@ -247,19 +247,27 @@ async function main() {
           break;
         }
       } else {
-        // In remote mode: check the updates page and directory
+        // In remote mode: check if the entry is still PENDING/PROCESSING or if it completed / already existed
         const refreshBtn = page.locator('.updates-page .refresh-button');
         if (await refreshBtn.isVisible()) {
           await refreshBtn.click().catch(() => {});
         }
         await sleep(1000);
-        const updatesText = await page.textContent('.updates-page');
-        if (updatesText?.includes('developer.mozilla.org')) {
-          console.log(`   [Queue] developer.mozilla.org visible in updates queue...`);
+        const activeMdnRows = page
+          .locator('.updates-page tr, .updates-page .directory-card')
+          .filter({ hasText: 'developer.mozilla.org' })
+          .filter({ has: page.locator('.status-pending, .status-processing') });
+        const activeCount = await activeMdnRows.count();
+        if (activeCount > 0) {
+          console.log(`   [Queue] developer.mozilla.org actively processing in updates queue...`);
         } else {
-          // If not in updates queue, check directory
           mdnCompleted = true;
-          console.log(`   🎉 developer.mozilla.org processed out of updates queue!`);
+          const updatesText = await page.textContent('.updates-page');
+          if (updatesText?.includes('developer.mozilla.org') && updatesText?.includes('already exists')) {
+            console.log(`   ℹ️ developer.mozilla.org already existed in production DB (duplicate tag verified)!`);
+          } else {
+            console.log(`   🎉 developer.mozilla.org processed and completed!`);
+          }
           break;
         }
       }
@@ -309,11 +317,20 @@ async function main() {
           await refreshBtn.click().catch(() => {});
         }
         await sleep(1000);
-        const updatesText = await page.textContent('.updates-page');
-        if (updatesText?.includes('plaid.com/docs')) {
-          console.log(`   [Queue] plaid.com/docs visible in updates queue...`);
+        const activePlaidRows = page
+          .locator('.updates-page tr, .updates-page .directory-card')
+          .filter({ hasText: 'plaid.com/docs' })
+          .filter({ has: page.locator('.status-pending, .status-processing') });
+        const activeCount = await activePlaidRows.count();
+        if (activeCount > 0) {
+          console.log(`   [Queue] plaid.com/docs actively processing in updates queue...`);
         } else {
-          console.log(`   🎉 plaid.com/docs processed out of updates queue!`);
+          const updatesText = await page.textContent('.updates-page');
+          if (updatesText?.includes('plaid.com/docs') && updatesText?.includes('already exists')) {
+            console.log(`   ℹ️ plaid.com/docs already existed in production DB (duplicate tag verified)!`);
+          } else {
+            console.log(`   🎉 plaid.com/docs processed and completed!`);
+          }
           break;
         }
       }
@@ -340,12 +357,18 @@ async function main() {
     await sleep(800);
     const plaidFound = (await page.locator('.table-row').count()) > 0;
     console.log(`   Directory search "Plaid" found: ${plaidFound}`);
+    if (!plaidFound) {
+      throw new Error('Expected Plaid (https://plaid.com/docs) to be COMPLETED and visible in Directory');
+    }
 
     // Search and verify MDN Web Docs
     await searchInput.fill('MDN');
     await sleep(800);
     const mdnFound = (await page.locator('.table-row').count()) > 0;
     console.log(`   Directory search "MDN" found: ${mdnFound}`);
+    if (!mdnFound) {
+      throw new Error('Expected MDN Web Docs (https://developer.mozilla.org) to be COMPLETED and visible in Directory');
+    }
 
     // Clear search and count total
     await searchInput.fill('');

@@ -242,6 +242,101 @@ export function extractInternalLinks(
   return links;
 }
 
+// Extract title and description directly from an official llms.txt document.
+function parseMetadataFromOfficialLlmsTxt(
+  llmsTxt: string,
+  fallbackUrl: string
+): { title: string; description: string } {
+  const lines = llmsTxt.split(/\r?\n/);
+  let title = '';
+  let description = '';
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!title && trimmed.startsWith('# ')) {
+      title = trimmed.slice(2).trim();
+    } else if (!description && trimmed.startsWith('>')) {
+      description = trimmed.replace(/^>+\s*/, '').trim();
+    }
+    if (title && description) break;
+  }
+  const brand = getBrandNameFromUrl(fallbackUrl);
+  return {
+    title: title || (brand ? `${brand} Documentation` : 'Documentation'),
+    description:
+      description || `Official technical documentation and guides for ${title || brand || fallbackUrl}.`,
+  };
+}
+
+// Fetch raw HTML using standard HTTP fetch when headless Chromium is unavailable.
+async function fetchHtmlWithTimeout(url: string, timeoutMs: number = 15000): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} fetching ${url}`);
+    }
+    return await res.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Lightweight HTTP + JSDOM scraper fallback when Playwright browser cannot launch.
+async function scrapeWebsiteWithFetch(
+  websiteUrl: string,
+  officialFiles: { llmsTxt: string; llmsFullTxt?: string } | null
+): Promise<ScrapedPage> {
+  const mainHtml = await fetchHtmlWithTimeout(websiteUrl, 20000);
+  const mainExtracted = extractArticleAndMarkdown(mainHtml, websiteUrl);
+  const links = extractInternalLinks(mainHtml, websiteUrl, 25);
+
+  if (links.length === 0) {
+    links.push({
+      title: mainExtracted.title || 'Documentation Overview',
+      href: websiteUrl,
+    });
+  }
+
+  const subPages: ScrapedSubPage[] = [];
+  const subpagesToFetch = links.slice(0, 5);
+
+  for (const link of subpagesToFetch) {
+    if (link.href === websiteUrl) continue;
+    try {
+      const subHtml = await fetchHtmlWithTimeout(link.href, 12000);
+      const subExtracted = extractArticleAndMarkdown(subHtml, link.href);
+      subPages.push({
+        url: link.href,
+        title: subExtracted.title || link.title,
+        description: subExtracted.description,
+        markdownContent: subExtracted.markdownContent,
+      });
+    } catch {
+      // Skip failed subpage.
+    }
+  }
+
+  return {
+    url: websiteUrl,
+    title: mainExtracted.title,
+    description: mainExtracted.description,
+    links,
+    textContent: mainExtracted.textContent,
+    markdownContent: mainExtracted.markdownContent,
+    subPages,
+    officialLlmsTxt: officialFiles?.llmsTxt,
+    officialLlmsFullTxt: officialFiles?.llmsFullTxt,
+  };
+}
+
 // Fetch and parse a website into structured page data.
 export async function scrapeWebsite(rawWebsiteUrl: string): Promise<ScrapedPage> {
   const websiteUrl = normalizeUrl(rawWebsiteUrl);
@@ -249,8 +344,32 @@ export async function scrapeWebsite(rawWebsiteUrl: string): Promise<ScrapedPage>
   // Check if site already has an official llms.txt.
   const officialFiles = await checkExistingLlmsTxt(websiteUrl);
 
-  // Launch headless browser.
-  const browser: Browser = await chromium.launch({ headless: true });
+  // Fast-path: if both official llms.txt and llms-full.txt exist, return immediately without launching Chromium.
+  if (officialFiles?.llmsTxt && officialFiles?.llmsFullTxt) {
+    const meta = parseMetadataFromOfficialLlmsTxt(officialFiles.llmsTxt, websiteUrl);
+    return {
+      url: websiteUrl,
+      title: meta.title,
+      description: meta.description,
+      links: [{ title: meta.title, href: websiteUrl }],
+      textContent: officialFiles.llmsTxt,
+      markdownContent: officialFiles.llmsTxt,
+      subPages: [],
+      officialLlmsTxt: officialFiles.llmsTxt,
+      officialLlmsFullTxt: officialFiles.llmsFullTxt,
+    };
+  }
+
+  // Launch headless browser with container-friendly flags, falling back to HTTP fetch if unavailable.
+  let browser: Browser | null = null;
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    });
+  } catch {
+    return scrapeWebsiteWithFetch(websiteUrl, officialFiles);
+  }
 
   try {
     const context = await browser.newContext({
@@ -274,11 +393,19 @@ export async function scrapeWebsite(rawWebsiteUrl: string): Promise<ScrapedPage>
     const mainExtracted = extractArticleAndMarkdown(mainHtml, websiteUrl);
     const links = extractInternalLinks(mainHtml, websiteUrl, 25);
 
+    if (links.length === 0) {
+      links.push({
+        title: mainExtracted.title || 'Documentation Overview',
+        href: websiteUrl,
+      });
+    }
+
     // Fetch up to 5 subpages for llms-full.txt.
     const subPages: ScrapedSubPage[] = [];
     const subpagesToFetch = links.slice(0, 5);
 
     for (const link of subpagesToFetch) {
+      if (link.href === websiteUrl) continue;
       try {
         await page.goto(link.href, {
           waitUntil: 'domcontentloaded',

@@ -1,6 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { db } from '@llmstxt/database';
 import { handleGetEntries, handlePostEntry } from './routes/entries.js';
 import { handleSearch } from './routes/search.js';
 import { initSentry, logInfo } from './services/logger.js';
@@ -39,7 +40,7 @@ export function startApiServer(port: number = PORT): void {
       return handleSearch(req, res);
     }
 
-    // Serve local files in development.
+    // Serve stored .txt files from local disk or PostgreSQL storage_files fallback.
     if (pathname.startsWith('/storage/') && req.method === 'GET') {
       const relPath = pathname.slice('/storage/'.length);
       const storageDir = path.resolve(process.env.LOCAL_STORAGE_DIR || './data/storage');
@@ -52,7 +53,7 @@ export function startApiServer(port: number = PORT): void {
         return;
       }
 
-      // Send file contents.
+      // Send file contents from local disk first, falling back to PostgreSQL storage_files.
       try {
         const content = await fs.readFile(safePath, 'utf-8');
         res.writeHead(200, {
@@ -62,6 +63,15 @@ export function startApiServer(port: number = PORT): void {
         res.end(content);
         return;
       } catch {
+        const dbContent = await db.getStorageFile(relPath);
+        if (dbContent !== null) {
+          res.writeHead(200, {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Access-Control-Allow-Origin': '*',
+          });
+          res.end(dbContent);
+          return;
+        }
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'File not found' }));
         return;
@@ -75,6 +85,15 @@ export function startApiServer(port: number = PORT): void {
 
   server.listen(port, () => {
     logInfo(`[API Gateway] Listening on http://localhost:${port}`);
+    // Ensure background queue polling is active so queued jobs are processed even if worker container is building/restarting.
+    const workerModulePath = '../../worker/src/index.js';
+    void import(workerModulePath)
+      .then((m) => {
+        if (typeof m.startWorker === 'function') {
+          m.startWorker();
+        }
+      })
+      .catch(() => {});
   });
 }
 

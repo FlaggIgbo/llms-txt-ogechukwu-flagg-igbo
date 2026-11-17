@@ -34,9 +34,13 @@ export class StorageService {
       return storageUri;
     }
 
-    // Default API base URL for local development.
-    const apiPort = process.env.API_PORT || '4000';
-    const apiBase = process.env.VITE_API_BASE_URL || `http://localhost:${apiPort}`;
+    // Default API base URL for local development or Render production.
+    const apiPort = process.env.PORT || process.env.API_PORT || '4000';
+    const apiBase =
+      process.env.RENDER_EXTERNAL_URL ||
+      process.env.API_PUBLIC_URL ||
+      process.env.VITE_API_BASE_URL ||
+      `http://localhost:${apiPort}`;
     const cleanApiBase = apiBase.endsWith('/') ? apiBase.slice(0, -1) : apiBase;
 
     // Handle local file paths (file:///path).

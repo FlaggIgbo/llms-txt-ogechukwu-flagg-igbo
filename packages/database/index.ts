@@ -162,22 +162,61 @@ export class DatabaseClient {
       this.pool = new pg.Pool({
         connectionString,
         ssl: isRemote ? { rejectUnauthorized: false } : undefined,
+        allowExitOnIdle: true,
       });
     }
     return this.pool;
   }
 
-  // Insert seed rows if not already done.
+  // Insert seed rows and ensure schema tables if not already done.
   async ensureDevelopmentSeed(): Promise<void> {
     if (this.hasEnsuredSeed) return;
     try {
       const pool = this.getPool();
       await pool
         .query(
-          `ALTER TABLE site_entries ADD COLUMN IF NOT EXISTS error_message TEXT;
+          `DO $$
+           BEGIN
+             IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'entry_status') THEN
+               CREATE TYPE entry_status AS ENUM ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED');
+             END IF;
+           END $$;
+
+           CREATE TABLE IF NOT EXISTS site_entries (
+             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+             website_name TEXT NOT NULL DEFAULT '',
+             website_url TEXT NOT NULL,
+             website_short_description TEXT NOT NULL DEFAULT '',
+             is_updated_latest BOOLEAN NOT NULL DEFAULT FALSE,
+             llms_txt_storage TEXT,
+             llms_full_txt_storage TEXT,
+             status entry_status NOT NULL DEFAULT 'PENDING',
+             error_message TEXT,
+             is_scheduled_update BOOLEAN NOT NULL DEFAULT FALSE,
+             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+           );
+
+           ALTER TABLE site_entries ADD COLUMN IF NOT EXISTS error_message TEXT;
            ALTER TABLE site_entries ADD COLUMN IF NOT EXISTS is_scheduled_update BOOLEAN NOT NULL DEFAULT FALSE;
            ALTER TABLE site_entries DROP CONSTRAINT IF EXISTS site_entries_website_url_key;
            CREATE UNIQUE INDEX IF NOT EXISTS idx_site_entries_completed_url ON site_entries (website_url) WHERE status = 'COMPLETED';
+
+           CREATE TABLE IF NOT EXISTS site_cadence (
+             site_id UUID PRIMARY KEY REFERENCES site_entries(id) ON DELETE CASCADE,
+             url TEXT NOT NULL,
+             site_category TEXT,
+             check_interval_hours INT NOT NULL DEFAULT 24,
+             unchanged_streak INT NOT NULL DEFAULT 0,
+             etag TEXT,
+             last_modified TEXT,
+             last_content_hash TEXT,
+             last_checked_at TIMESTAMPTZ,
+             next_check_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '24 hours',
+             status TEXT NOT NULL DEFAULT 'idle'
+           );
+
+           CREATE INDEX IF NOT EXISTS idx_site_cadence_due ON site_cadence (next_check_at) WHERE status = 'idle';
 
            DO $$
            BEGIN
@@ -201,7 +240,13 @@ export class DatabaseClient {
            );
 
            CREATE INDEX IF NOT EXISTS idx_background_jobs_queue ON background_jobs (status, created_at) WHERE status = 'QUEUED';
-           CREATE INDEX IF NOT EXISTS idx_background_jobs_dlq ON background_jobs (status, failed_at) WHERE status = 'DEAD_LETTER';`
+           CREATE INDEX IF NOT EXISTS idx_background_jobs_dlq ON background_jobs (status, failed_at) WHERE status = 'DEAD_LETTER';
+
+           CREATE TABLE IF NOT EXISTS storage_files (
+             rel_path TEXT PRIMARY KEY,
+             content TEXT NOT NULL,
+             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+           );`
         )
         .catch(() => {});
 
@@ -212,7 +257,7 @@ export class DatabaseClient {
             is_updated_latest, llms_txt_storage, llms_full_txt_storage,
             status, created_at, updated_at
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-          ON CONFLICT (website_url) DO UPDATE SET
+          ON CONFLICT (id) DO UPDATE SET
             website_name = EXCLUDED.website_name,
             website_short_description = EXCLUDED.website_short_description,
             is_updated_latest = EXCLUDED.is_updated_latest,
@@ -234,6 +279,28 @@ export class DatabaseClient {
           ]
         );
       }
+
+      // Recover any entries or jobs stuck in PROCESSING from a previous restart and backfill orphaned PENDING entries.
+      await pool
+        .query(
+          `DELETE FROM site_entries a USING site_entries b
+           WHERE a.created_at > b.created_at
+             AND a.website_url = b.website_url
+             AND a.status IN ('PENDING', 'PROCESSING')
+             AND b.status IN ('PENDING', 'PROCESSING');
+           UPDATE site_entries SET status = 'PENDING', is_scheduled_update = FALSE, updated_at = NOW() WHERE status = 'PROCESSING';
+           UPDATE background_jobs SET status = 'QUEUED', updated_at = NOW() WHERE status = 'PROCESSING';
+           INSERT INTO background_jobs (entry_id, website_url, is_scheduled_update, status, attempts, max_attempts, created_at, updated_at)
+           SELECT se.id, se.website_url, FALSE, 'QUEUED', 0, 3, NOW(), NOW()
+           FROM site_entries se
+           WHERE se.status = 'PENDING'
+             AND NOT EXISTS (
+               SELECT 1 FROM background_jobs bj
+               WHERE bj.entry_id = se.id AND bj.status IN ('QUEUED', 'PROCESSING')
+             );`
+        )
+        .catch(() => {});
+
       this.hasEnsuredSeed = true;
     } catch (err) {
       if (process.env.NODE_ENV !== 'production') {
@@ -246,12 +313,12 @@ export class DatabaseClient {
   // Get all entries sorted by newest update.
   async listEntries(): Promise<SiteEntry[]> {
     const isDev = isDevMode();
-    if (isDev && !this.hasEnsuredSeed) {
+    if (!this.hasEnsuredSeed) {
       await this.ensureDevelopmentSeed();
     }
 
     const selectAllSql =
-      'SELECT id, website_name, website_url, website_short_description, is_updated_latest, llms_txt_storage, llms_full_txt_storage, status, created_at, updated_at FROM site_entries ORDER BY updated_at DESC';
+      'SELECT id, website_name, website_url, website_short_description, is_updated_latest, llms_txt_storage, llms_full_txt_storage, status, error_message, is_scheduled_update, created_at, updated_at FROM site_entries ORDER BY updated_at DESC';
 
     try {
       const pool = this.getPool();
@@ -558,7 +625,7 @@ export class DatabaseClient {
 
         const cadenceRes = await client.query(
           `INSERT INTO site_cadence (site_id, url, site_category, check_interval_hours, next_check_at, status)
-           VALUES ($1, $2, $3, $4, NOW(), 'idle')
+           VALUES ($1, $2, $3, $4, NOW() + ($4 || ' hours')::INTERVAL, 'idle')
            RETURNING *`,
           [entry.id, entry.website_url, siteCategory, intervalHours]
         );
@@ -620,9 +687,10 @@ export class DatabaseClient {
         UPDATE site_cadence
         SET status = 'queued'
         WHERE site_id IN (
-          SELECT site_id FROM site_cadence
-          WHERE next_check_at <= NOW() AND status = 'idle'
-          ORDER BY next_check_at ASC
+          SELECT sc.site_id FROM site_cadence sc
+          INNER JOIN site_entries se ON se.id = sc.site_id
+          WHERE sc.next_check_at <= NOW() AND sc.status = 'idle' AND se.status = 'COMPLETED'
+          ORDER BY sc.next_check_at ASC
           LIMIT $1
           FOR UPDATE SKIP LOCKED
         )
@@ -726,7 +794,7 @@ export class DatabaseClient {
       updated_at: now,
     };
 
-    if (isDev && !this.hasEnsuredSeed) {
+    if (!this.hasEnsuredSeed) {
       await this.ensureDevelopmentSeed();
     }
 
@@ -753,7 +821,7 @@ export class DatabaseClient {
   async claimNextBackgroundJob(): Promise<BackgroundJob | null> {
     const isDev = isDevMode();
 
-    if (isDev && !this.hasEnsuredSeed) {
+    if (!this.hasEnsuredSeed) {
       await this.ensureDevelopmentSeed();
     }
 
@@ -1063,6 +1131,45 @@ export class DatabaseClient {
         return count;
       }
       throw err;
+    }
+  }
+
+  // Persist generated .txt file content in PostgreSQL so API and worker containers share access.
+  async saveStorageFile(relPath: string, content: string): Promise<void> {
+    if (!this.hasEnsuredSeed) {
+      await this.ensureDevelopmentSeed();
+    }
+    try {
+      const pool = this.getPool();
+      const cleanRel = relPath.replace(/^\/+/, '');
+      await pool.query(
+        `INSERT INTO storage_files (rel_path, content, updated_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (rel_path) DO UPDATE SET
+           content = EXCLUDED.content,
+           updated_at = NOW()`,
+        [cleanRel, content]
+      );
+    } catch {
+      // Ignore storage persistence errors in mock/dev fallback.
+    }
+  }
+
+  // Retrieve generated .txt file content from PostgreSQL.
+  async getStorageFile(relPath: string): Promise<string | null> {
+    if (!this.hasEnsuredSeed) {
+      await this.ensureDevelopmentSeed();
+    }
+    try {
+      const pool = this.getPool();
+      const cleanRel = relPath.replace(/^\/+/, '');
+      const res = await pool.query('SELECT content FROM storage_files WHERE rel_path = $1 LIMIT 1', [cleanRel]);
+      if (res.rows.length > 0 && typeof res.rows[0].content === 'string') {
+        return res.rows[0].content;
+      }
+      return null;
+    } catch {
+      return null;
     }
   }
 }
