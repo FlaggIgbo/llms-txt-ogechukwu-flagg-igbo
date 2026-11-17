@@ -5,6 +5,7 @@ import { SearchBar } from './components/SearchBar';
 import { DirectoryCard } from './components/DirectoryCard';
 import { DirectoryTable } from './components/DirectoryTable';
 import { SubmissionForm } from './components/SubmissionForm';
+import { PaginationControls } from './components/PaginationControls';
 import { MOCK_SEED_ENTRIES } from './hooks/useEntries';
 import './App.css';
 
@@ -222,6 +223,26 @@ function Harness(): React.ReactElement {
                 </form>
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 6. PaginationControls Component */}
+      <section style={{ marginBottom: '3rem' }}>
+        <h2>Pagination Controls</h2>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div
+            id="harness-pagination-controls"
+            style={{
+              background: '#ffffff',
+              padding: '1rem',
+              border: '1px solid #d0d7de',
+              borderRadius: '6px',
+              display: 'flex',
+              justifyContent: 'center',
+            }}
+          >
+            <PaginationControls page={2} totalPages={5} onPageChange={() => {}} />
           </div>
         </div>
       </section>

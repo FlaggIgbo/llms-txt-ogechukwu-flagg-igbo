@@ -24,6 +24,7 @@ import { db, DuplicateEntryError } from '@llmstxt/database';
 import { HomePage } from '../pages/HomePage.js';
 import { AddEntryPage } from '../pages/AddEntryPage.js';
 import { UpdatesPage } from '../pages/UpdatesPage.js';
+import { PaginationControls } from '../components/PaginationControls.js';
 import {
   EntryStatus,
   EntryErrorCode,
@@ -434,6 +435,50 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
       assert.ok(html.includes('Page 1 of 2'));
       assert.ok(html.includes('Forward'));
       assert.ok(html.includes('Showing 2 of 4 entries'));
+    });
+  });
+
+  describe('PaginationControls Component', () => {
+    it('disables Back button on page 1 and enables Forward button when totalPages > 1', () => {
+      const html = renderToString(
+        React.createElement(PaginationControls, {
+          page: 1,
+          totalPages: 5,
+          onPageChange: () => {},
+        })
+      );
+
+      assert.ok(html.includes('disabled=""') || html.includes('disabled'));
+      assert.ok(html.includes('Back'));
+      assert.ok(html.includes('Page 1 of 5'));
+      assert.ok(html.includes('Forward'));
+    });
+
+    it('enables both Back and Forward buttons on middle pages', () => {
+      const html = renderToString(
+        React.createElement(PaginationControls, {
+          page: 3,
+          totalPages: 5,
+          onPageChange: () => {},
+        })
+      );
+
+      assert.ok(html.includes('Page 3 of 5'));
+      assert.ok(html.includes('Back'));
+      assert.ok(html.includes('Forward'));
+    });
+
+    it('disables Forward button on the last page', () => {
+      const html = renderToString(
+        React.createElement(PaginationControls, {
+          page: 5,
+          totalPages: 5,
+          onPageChange: () => {},
+        })
+      );
+
+      assert.ok(html.includes('Page 5 of 5'));
+      assert.ok(html.includes('disabled'));
     });
   });
 

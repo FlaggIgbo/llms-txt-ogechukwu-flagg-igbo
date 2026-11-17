@@ -30,7 +30,8 @@ screenshots/
 │   ├── search-bar-filled.png         # SearchBar with input text
 │   ├── submission-form-empty.png     # SubmissionForm initial blank state
 │   ├── submission-form-validation.png# SubmissionForm showing inline validation errors
-│   └── submission-form-filled.png    # SubmissionForm with valid input data
+│   ├── submission-form-filled.png    # SubmissionForm with valid input data
+│   └── pagination-controls.png       # PaginationControls component with Back, Page X of Y, and Forward
 │
 └── pages/                            # Full-page responsive views
     ├── home-page.png                 # Main directory page (Desktop 1280x800)

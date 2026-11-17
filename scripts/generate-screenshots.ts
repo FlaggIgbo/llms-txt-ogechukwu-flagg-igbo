@@ -205,6 +205,7 @@ export async function generateScreenshots(): Promise<string[]> {
       { id: '#harness-submission-form-empty', filename: 'submission-form-empty.png' },
       { id: '#harness-submission-form-validation', filename: 'submission-form-validation.png' },
       { id: '#harness-submission-form-filled', filename: 'submission-form-filled.png' },
+      { id: '#harness-pagination-controls', filename: 'pagination-controls.png' },
     ];
 
     for (const target of componentTargets) {

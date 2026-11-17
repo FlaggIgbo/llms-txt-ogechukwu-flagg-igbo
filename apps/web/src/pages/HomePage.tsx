@@ -2,6 +2,7 @@ import React from 'react';
 import type { SiteEntry } from '@llmstxt/shared-types';
 import { SearchBar } from '../components/SearchBar';
 import { DirectoryTable } from '../components/DirectoryTable';
+import { PaginationControls } from '../components/PaginationControls';
 
 // Props for the home page.
 export interface HomePageProps {
@@ -66,33 +67,11 @@ export function HomePage({
             </span>
 
             {onPageChange && (
-              <div
-                className="pagination-controls"
-                role="navigation"
-                aria-label="Pagination Navigation"
-              >
-                <button
-                  type="button"
-                  className="pagination-btn pagination-back"
-                  onClick={() => onPageChange(Math.max(1, page - 1))}
-                  disabled={page <= 1}
-                  aria-label="Previous page (Back)"
-                >
-                  Back
-                </button>
-                <span className="pagination-info">
-                  {`Page ${page} of ${totalPages}`}
-                </span>
-                <button
-                  type="button"
-                  className="pagination-btn pagination-forward"
-                  onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-                  disabled={page >= totalPages}
-                  aria-label="Next page (Forward)"
-                >
-                  Forward
-                </button>
-              </div>
+              <PaginationControls
+                page={page}
+                totalPages={totalPages}
+                onPageChange={onPageChange}
+              />
             )}
 
             <button className="refresh-button" onClick={() => void onRefresh()}>
