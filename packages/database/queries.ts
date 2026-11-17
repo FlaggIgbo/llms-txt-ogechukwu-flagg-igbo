@@ -236,7 +236,7 @@ export const SELECT_CADENCE_BY_SITE_ID_SQL = 'SELECT * FROM site_cadence WHERE s
  */
 export const INSERT_CADENCE_TRANSACTION_SQL = `
   INSERT INTO site_cadence (site_id, url, site_category, check_interval_hours, next_check_at, status)
-  VALUES ($1, $2, $3, $4, NOW() + ($4 * INTERVAL '1 hour'), 'idle')
+  VALUES ($1, $2, $3, $4::int, NOW() + ($4::int * INTERVAL '1 hour'), 'idle')
   RETURNING *
 `;
 
