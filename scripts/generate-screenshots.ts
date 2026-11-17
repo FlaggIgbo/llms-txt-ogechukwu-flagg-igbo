@@ -101,6 +101,19 @@ const MOCK_UPDATING_ENTRIES = [
     created_at: '2026-11-16T17:50:00.000Z',
     updated_at: '2026-11-16T17:52:00.000Z',
   },
+  {
+    id: 'upd-4',
+    website_name: 'FastAPI Clone',
+    website_url: 'https://fastapi.tiangolo.com',
+    website_short_description: null,
+    is_updated_latest: false,
+    llms_txt_storage: null,
+    llms_full_txt_storage: null,
+    status: 'FAILED',
+    error_message: 'Website URL already exists in site_entries table',
+    created_at: '2026-11-16T17:40:00.000Z',
+    updated_at: '2026-11-16T17:42:00.000Z',
+  },
 ];
 
 // Injects styles to freeze animations and hide blinking carets for deterministic screenshots

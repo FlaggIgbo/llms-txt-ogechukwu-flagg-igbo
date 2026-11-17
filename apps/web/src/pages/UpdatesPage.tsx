@@ -132,6 +132,15 @@ export function UpdatesPage({
                     <td className="cell-status">
                       <div className="status-cell-wrapper">
                         {renderStatusBadge(entry)}
+                        {entry.status === 'FAILED' &&
+                          entry.error_message?.toLowerCase().includes('already exists') && (
+                            <span
+                              className="entry-error-tag error-duplicate-url"
+                              title={entry.error_message}
+                            >
+                              {entry.error_message}
+                            </span>
+                          )}
                       </div>
                     </td>
                     <td className="cell-llm-txt">

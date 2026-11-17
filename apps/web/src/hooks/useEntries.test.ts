@@ -282,7 +282,7 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
       assert.ok(!html.includes('entry-error-tag'));
     });
 
-    it('shows failed status badge when duplicate URL entry is present', () => {
+    it('shows failed status badge with error tag along with icon when duplicate URL entry already exists in db', () => {
       const duplicateEntry = {
         ...MOCK_SEED_ENTRIES[0],
         id: 'dup-1',
@@ -305,7 +305,8 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
       assert.ok(html.includes('status-failed'));
       assert.ok(html.includes('status-failed-icon'));
       assert.ok(html.includes('Website URL already exists in site_entries table'));
-      assert.ok(!html.includes('entry-error-tag'));
+      assert.ok(html.includes('entry-error-tag'));
+      assert.ok(html.includes('error-duplicate-url'));
     });
 
     it('excludes cron-scheduled failed entries from the updates queue', () => {
