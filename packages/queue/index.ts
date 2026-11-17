@@ -139,10 +139,8 @@ export class GenerationQueue {
           for (const handler of this.handlers) {
             await handler(payload);
           }
-          this.activeJobs.delete(job.id);
           await db.completeBackgroundJob(claimed.id);
         } catch (err: unknown) {
-          this.activeJobs.delete(job.id);
           const errorMsg = err instanceof Error ? err.message : String(err);
           job.lastError = errorMsg;
 
@@ -157,6 +155,8 @@ export class GenerationQueue {
           } else {
             await this.moveToDeadLetterQueue(job, err);
           }
+        } finally {
+          this.activeJobs.delete(job.id);
         }
       }
     } catch (err) {
