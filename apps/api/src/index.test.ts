@@ -48,6 +48,19 @@ describe('SSRF Protection (validatePublicUrl)', () => {
     assert.equal((await validatePublicUrl('https://docs.github.com/en')).valid, true);
     assert.equal((await validatePublicUrl('http://fastapi.tiangolo.com')).valid, true);
   });
+
+  it('permits localhost and internal URLs when allowLocal is explicitly enabled', async () => {
+    assert.equal((await validatePublicUrl('http://localhost:3000', { allowLocal: true })).valid, true);
+    assert.equal((await validatePublicUrl('http://127.0.0.1:8080/docs', { allowLocal: true })).valid, true);
+
+    process.env.ALLOW_LOCAL_URLS = 'true';
+    try {
+      assert.equal((await validatePublicUrl('http://localhost:4000')).valid, true);
+      assert.equal((await validatePublicUrl('http://127.0.0.1:5173')).valid, true);
+    } finally {
+      delete process.env.ALLOW_LOCAL_URLS;
+    }
+  });
 });
 
 describe('Rate Limiter Anti-Spoofing & Limits', () => {

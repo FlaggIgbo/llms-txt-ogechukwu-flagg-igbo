@@ -54,7 +54,8 @@ export function isPrivateOrReservedIp(ip: string): boolean {
 
 // Validate that a submitted URL is syntactically valid and does not resolve to private or cloud metadata IPs (SSRF protection).
 export async function validatePublicUrl(
-  rawUrl: string
+  rawUrl: string,
+  options?: { allowLocal?: boolean }
 ): Promise<{ valid: boolean; error?: string }> {
   if (!rawUrl || typeof rawUrl !== 'string') {
     return { valid: false, error: 'URL is required' };
@@ -79,6 +80,15 @@ export async function validatePublicUrl(
   // Strip brackets from IPv6 hostnames like [::1]
   if (checkHost.startsWith('[') && checkHost.endsWith(']')) {
     checkHost = checkHost.slice(1, -1);
+  }
+
+  // When explicitly enabled via options, environment flag, or in development mode, permit localhost / internal URLs
+  const allowLocal =
+    options?.allowLocal ??
+    (process.env.ALLOW_LOCAL_URLS === 'true' || process.env.NODE_ENV === 'development');
+
+  if (allowLocal) {
+    return { valid: true };
   }
 
   // Block local / internal hostnames
