@@ -34,3 +34,11 @@ jobs:
 
       - name: Run unit tests
         run: npm run test
+
+      - name: Install Playwright Browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Verify frontend screenshots are up-to-date
+        run: |
+          npm run screenshots
+          git diff --exit-code screenshots/

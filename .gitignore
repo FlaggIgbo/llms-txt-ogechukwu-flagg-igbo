@@ -28,6 +28,10 @@ pnpm-debug.log*
 *.swp
 *.swo
 
+# Local Storage
+data/
+recordings/
+
 # Terraform
 **/.terraform/*
 *.tfstate

@@ -16,6 +16,7 @@
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "test:e2e": "tsx scripts/e2e-playwright-flow.ts",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down",
