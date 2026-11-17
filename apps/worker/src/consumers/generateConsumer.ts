@@ -6,6 +6,7 @@ import {
   EntryStatus,
   EntryErrorCode,
   EntryErrorMessage,
+  SiteCategory,
 } from '@llmstxt/shared-types';
 import { scrapeWebsite } from '../services/scraper.js';
 import {
@@ -76,20 +77,35 @@ export async function handleGenerateJob(payload: GenerateJobPayload): Promise<vo
 
     // Full crawl and generation (for initial run or detected changes).
     const scraped = await scrapeWebsite(websiteUrl);
-    const files = await generateLlmsTxtFiles(scraped);
 
-    // Verify generated files adhere to standard structure and are not corrupted before upload.
-    assertValidLlmsFiles(files.llmsTxt, files.llmsFullTxt);
+    let llmsTxtStorage: string;
+    let llmsFullTxtStorage: string | null = null;
+    let siteCategory: SiteCategory = SiteCategory.API_DOCS;
 
-    const uploaded = await uploadToStorage(websiteUrl, files.llmsTxt, files.llmsFullTxt);
+    if (scraped.officialLlmsTxtUrl) {
+      // For providers with actual existing official llms.txt files (e.g. LangChain, Perplexity),
+      // we do not store duplicate copies in Cloudflare; store the direct URL in Postgres.
+      llmsTxtStorage = scraped.officialLlmsTxtUrl;
+      llmsFullTxtStorage = scraped.officialLlmsFullTxtUrl || null;
+    } else {
+      const files = await generateLlmsTxtFiles(scraped);
+      siteCategory = files.siteCategory;
+
+      // Verify generated files adhere to standard structure and are not corrupted before upload.
+      assertValidLlmsFiles(files.llmsTxt, files.llmsFullTxt);
+
+      const uploaded = await uploadToStorage(websiteUrl, files.llmsTxt, files.llmsFullTxt);
+      llmsTxtStorage = uploaded.llmsTxtUri;
+      llmsFullTxtStorage = uploaded.llmsFullTxtUri;
+    }
 
     // Update main entry record.
     await db.updateEntry(entryId, {
       website_name: scraped.title,
       website_short_description: scraped.description || scraped.title || 'Documentation and website overview',
       is_updated_latest: true,
-      llms_txt_storage: uploaded.llmsTxtUri,
-      llms_full_txt_storage: uploaded.llmsFullTxtUri,
+      llms_txt_storage: llmsTxtStorage,
+      llms_full_txt_storage: llmsFullTxtStorage,
       status: EntryStatus.COMPLETED,
       error_message: null,
       is_scheduled_update: false,
@@ -99,8 +115,8 @@ export async function handleGenerateJob(payload: GenerateJobPayload): Promise<vo
     const cadence = await db.getCadenceBySiteId(entryId);
     const isFirstCrawl = !cadence?.last_checked_at;
     const initialBaseInterval = isFirstCrawl
-      ? getInitialIntervalForCategory(files.siteCategory)
-      : (cadence?.check_interval_hours || getInitialIntervalForCategory(files.siteCategory));
+      ? getInitialIntervalForCategory(siteCategory)
+      : (cadence?.check_interval_hours || getInitialIntervalForCategory(siteCategory));
 
     const next = computeNextCadence({
       isInitial: isFirstCrawl,
@@ -116,7 +132,7 @@ export async function handleGenerateJob(payload: GenerateJobPayload): Promise<vo
       newStreak: next.newStreak,
       nextCheckAt: next.nextCheckAt,
       contentHash,
-      siteCategory: files.siteCategory,
+      siteCategory,
     });
   } catch (err) {
     logError(err, { websiteUrl, entryId, context: 'Worker' });

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { ApiErrorCode, ApiErrorMessage } from '@llmstxt/shared-types';
 import { handleGetEntries, handlePostEntry } from './routes/entries.js';
 import { handleSearch } from './routes/search.js';
+import { storageService } from './services/storageService.js';
 import { initSentry, logInfo, logError } from './services/logger.js';
 
 initSentry();
@@ -74,13 +75,14 @@ export function startApiServer(port: number = PORT): void {
           return;
         }
 
-        // If Cloudflare R2 / MinIO / S3 is configured, redirect directly to S3 / R2
+        // If Cloudflare R2 / MinIO / S3 is configured with a public CDN, redirect
         const isMinio = (process.env.STORAGE_PROVIDER || 'minio').trim().toLowerCase() === 'minio';
         const s3Base = isMinio
           ? (process.env.S3_PUBLIC_URL || process.env.S3_ENDPOINT || 'http://localhost:9000')
-          : (process.env.R2_PUBLIC_URL || process.env.S3_PUBLIC_URL || process.env.S3_ENDPOINT);
+          : (process.env.R2_PUBLIC_URL || process.env.S3_PUBLIC_URL);
         const s3Bucket = process.env.R2_LLMS_TXT_BUCKET || 'llmstxt-files-bucket';
-        if (s3Base) {
+
+        if (s3Base && !s3Base.includes('r2.cloudflarestorage.com')) {
           const cleanBase = s3Base.endsWith('/') ? s3Base.slice(0, -1) : s3Base;
           const targetUrl = cleanBase.endsWith(`/${s3Bucket}`)
             ? `${cleanBase}/${relPath}`
@@ -93,7 +95,22 @@ export function startApiServer(port: number = PORT): void {
           return;
         }
 
-        // Files are stored exclusively in Cloudflare R2.
+        // Otherwise proxy and serve the file directly
+        try {
+          const fileContent = await storageService.fetchFile(relPath);
+          if (fileContent !== null) {
+            res.writeHead(200, {
+              'Content-Type': 'text/plain; charset=utf-8',
+              'Access-Control-Allow-Origin': '*',
+              'Cache-Control': 'public, max-age=3600',
+            });
+            res.end(fileContent);
+            return;
+          }
+        } catch (fetchErr) {
+          logError(fetchErr, { path: relPath, context: 'StorageProxy' });
+        }
+
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(
           JSON.stringify({

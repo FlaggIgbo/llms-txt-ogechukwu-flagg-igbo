@@ -31,12 +31,16 @@ export interface ScrapedPage {
   subPages: ScrapedSubPage[];
   officialLlmsTxt?: string;
   officialLlmsFullTxt?: string;
+  officialLlmsTxtUrl?: string;
+  officialLlmsFullTxtUrl?: string;
 }
 
 // Official llms.txt files already published by the site.
-interface OfficialFiles {
+export interface OfficialFiles {
   llmsTxt: string;
   llmsFullTxt?: string;
+  llmsTxtUrl?: string;
+  llmsFullTxtUrl?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -227,8 +231,27 @@ export async function checkExistingLlmsTxt(websiteUrl: string): Promise<Official
     const llmsTxt = await tryFetchLlmsFile(candidate);
     if (!llmsTxt) continue;
 
-    const llmsFullTxt = await tryFetchLlmsFile(candidate.replace(/llms\.txt$/, 'llms-full.txt'));
-    return { llmsTxt, llmsFullTxt: llmsFullTxt ?? undefined };
+    const fullCandidate = candidate.replace(/llms\.txt$/, 'llms-full.txt');
+    let llmsFullTxtUrl: string | undefined = undefined;
+    let llmsFullTxt: string | undefined = undefined;
+
+    // Check if official llms-full.txt exists
+    try {
+      const headRes = await safeFetch(fullCandidate, 5_000);
+      if (headRes.ok && (headRes.headers.get('content-type')?.includes('text') || headRes.status === 200)) {
+        llmsFullTxtUrl = fullCandidate;
+        llmsFullTxt = await tryFetchLlmsFile(fullCandidate).catch(() => undefined) ?? undefined;
+      }
+    } catch {
+      // ignore
+    }
+
+    return {
+      llmsTxt,
+      llmsFullTxt,
+      llmsTxtUrl: candidate,
+      llmsFullTxtUrl,
+    };
   }
   return null;
 }
@@ -252,7 +275,7 @@ function parseMetadataFromOfficialLlmsTxt(
 }
 
 // Build a ScrapedPage straight from official files, no crawling needed.
-function buildOfficialPage(websiteUrl: string, files: Required<OfficialFiles>): ScrapedPage {
+function buildOfficialPage(websiteUrl: string, files: OfficialFiles): ScrapedPage {
   const meta = parseMetadataFromOfficialLlmsTxt(files.llmsTxt, websiteUrl);
   return {
     url: websiteUrl,
@@ -264,6 +287,8 @@ function buildOfficialPage(websiteUrl: string, files: Required<OfficialFiles>): 
     subPages: [],
     officialLlmsTxt: files.llmsTxt,
     officialLlmsFullTxt: files.llmsFullTxt,
+    officialLlmsTxtUrl: files.llmsTxtUrl,
+    officialLlmsFullTxtUrl: files.llmsFullTxtUrl,
   };
 }
 
@@ -486,6 +511,8 @@ async function buildScrapedPage(
     subPages,
     officialLlmsTxt: officialFiles?.llmsTxt,
     officialLlmsFullTxt: officialFiles?.llmsFullTxt,
+    officialLlmsTxtUrl: officialFiles?.llmsTxtUrl,
+    officialLlmsFullTxtUrl: officialFiles?.llmsFullTxtUrl,
   };
 }
 

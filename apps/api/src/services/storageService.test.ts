@@ -71,12 +71,22 @@ describe('StorageService (getDownloadUrl)', () => {
       assert.equal(url, 'https://pub-abc123.r2.dev/my-bucket/site/llms.txt');
     });
 
-    it('falls back to CLOUDFLARE_ACCOUNT_ID if R2_PUBLIC_URL is unset', () => {
+    it('routes through /storage/ proxy route if R2_PUBLIC_URL is unset', () => {
       process.env.STORAGE_PROVIDER = 'r2';
-      process.env.CLOUDFLARE_ACCOUNT_ID = 'cf-acc-456';
+      process.env.PORT = '4000';
 
       const url = service.getDownloadUrl('r2://my-bucket/site/llms.txt');
-      assert.equal(url, 'https://cf-acc-456.r2.cloudflarestorage.com/my-bucket/site/llms.txt');
+      assert.equal(url, 'http://localhost:4000/storage/site/llms.txt');
+    });
+
+    it('converts private r2.cloudflarestorage.com endpoints to /storage/ proxy route', () => {
+      process.env.STORAGE_PROVIDER = 'r2';
+      process.env.PORT = '4000';
+
+      const url = service.getDownloadUrl(
+        'https://cf-acc-456.r2.cloudflarestorage.com/my-bucket/site/llms.txt'
+      );
+      assert.equal(url, 'http://localhost:4000/storage/site/llms.txt');
     });
   });
 });

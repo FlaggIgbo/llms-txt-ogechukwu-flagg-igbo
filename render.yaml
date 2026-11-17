@@ -42,6 +42,10 @@ services:
         value: llmstxt-files-bucket
       - key: CLOUDFLARE_ACCOUNT_ID
         sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
       - key: R2_PUBLIC_URL
         sync: false
       - key: SENTRY_DSN

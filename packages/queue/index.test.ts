@@ -96,7 +96,11 @@ describe('GenerationQueue with retries and DLQ', () => {
       websiteUrl: 'https://bounce.example.com',
     });
 
-    await new Promise((r) => setTimeout(r, 200));
+    // Wait for retries and moving to DLQ to complete (allowing for DB calls)
+    for (let i = 0; i < 20; i++) {
+      if (queue.getDeadLetterQueue().length === 1) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
     assert.equal(queue.getDeadLetterQueue().length, 1);
 
     await queue.bounceQueue();
