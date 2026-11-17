@@ -7,7 +7,7 @@ import { logWarn, logError } from './logger.js';
 export class StorageService {
   // Convert a storage path to a download URL.
   getDownloadUrl(storageUri: string | null): string | null {
-    if (!storageUri) {
+    if (!storageUri || !storageUri.trim()) {
       return null;
     }
 

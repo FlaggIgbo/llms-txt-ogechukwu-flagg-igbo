@@ -112,7 +112,7 @@ export function startApiServer(port: number = PORT): void {
         // Otherwise proxy and serve the file directly
         try {
           const fileContent = await storageService.fetchFile(relPath);
-          if (fileContent !== null) {
+          if (fileContent !== null && fileContent.trim().length > 0) {
             res.writeHead(200, {
               'Content-Type': 'text/plain; charset=utf-8',
               'Access-Control-Allow-Origin': '*',
@@ -123,6 +123,25 @@ export function startApiServer(port: number = PORT): void {
           }
         } catch (fetchErr) {
           logError(fetchErr, { path: relPath, context: 'StorageProxy' });
+        }
+
+        // Fallback to normal llms.txt if something is wrong with llms.txt full
+        if (relPath.endsWith('llms-full.txt') || relPath.endsWith('llms-full/txt')) {
+          try {
+            const fallbackPath = relPath.replace(/llms-full(?:\.txt|\/txt)$/, 'llms.txt');
+            const fallbackContent = await storageService.fetchFile(fallbackPath);
+            if (fallbackContent !== null && fallbackContent.trim().length > 0) {
+              res.writeHead(200, {
+                'Content-Type': 'text/plain; charset=utf-8',
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'public, max-age=3600',
+              });
+              res.end(fallbackContent);
+              return;
+            }
+          } catch (fallbackErr) {
+            logError(fallbackErr, { path: relPath, context: 'StorageProxyFallback' });
+          }
         }
 
         res.writeHead(404, { 'Content-Type': 'application/json' });

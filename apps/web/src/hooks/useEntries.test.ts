@@ -182,6 +182,7 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
       const entry = {
         ...MOCK_SEED_ENTRIES[0],
         llm_txt: 'http://localhost:4000/storage/fastapi/llms-full.txt',
+        llms_full_txt_storage: 'http://localhost:4000/storage/fastapi/llms-full.txt',
       };
       const html = renderToString(React.createElement(DirectoryCard, { entry }));
       assert.ok(html.includes('href="http://localhost:4000/storage/fastapi/llms-full.txt"'));

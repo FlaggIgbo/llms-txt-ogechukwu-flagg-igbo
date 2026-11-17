@@ -1,6 +1,8 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { StorageService } from './storageService.js';
+import { formatEntryStorageUrls } from '../routes/entries.js';
+import { type SiteEntry, EntryStatus } from '@llmstxt/shared-types';
 
 describe('StorageService (getDownloadUrl)', () => {
   const service = new StorageService();
@@ -87,6 +89,80 @@ describe('StorageService (getDownloadUrl)', () => {
         'https://cf-acc-456.r2.cloudflarestorage.com/my-bucket/site/llms.txt'
       );
       assert.equal(url, 'http://localhost:4000/storage/site/llms.txt');
+    });
+  });
+
+  describe('formatEntryStorageUrls (home page generated vs official file resolution)', () => {
+    it('returns llms-full.txt URL for generated websites', () => {
+      process.env.STORAGE_PROVIDER = 'r2';
+      process.env.PORT = '4000';
+
+      const generatedEntry: SiteEntry = {
+        id: '12345678-1234-1234-1234-123456789abc',
+        website_name: 'Generated Docs',
+        website_url: 'https://docs.generated.com',
+        website_short_description: 'Generated technical documentation',
+        is_updated_latest: true,
+        llms_txt_storage: 'r2://llmstxt-files-bucket/docs.generated.com/llms.txt',
+        llms_full_txt_storage: 'r2://llmstxt-files-bucket/docs.generated.com/llms-full.txt',
+        status: EntryStatus.COMPLETED,
+        created_at: '2026-11-01T10:00:00.000Z',
+        updated_at: '2026-11-14T14:22:10.000Z',
+      };
+
+      const formatted = formatEntryStorageUrls(generatedEntry);
+      assert.equal(formatted.llm_txt, 'http://localhost:4000/storage/docs.generated.com/llms-full.txt');
+      assert.equal(formatted.llms_txt_storage, 'http://localhost:4000/storage/docs.generated.com/llms.txt');
+      assert.equal(formatted.llms_full_txt_storage, 'http://localhost:4000/storage/docs.generated.com/llms-full.txt');
+    });
+
+    it('falls back to normal llms.txt if something is wrong with llms.txt full', () => {
+      process.env.STORAGE_PROVIDER = 'r2';
+      process.env.PORT = '4000';
+
+      const entryWithNullFull: SiteEntry = {
+        id: '12345678-1234-1234-1234-123456789abc',
+        website_name: 'Generated Docs',
+        website_url: 'https://docs.generated.com',
+        website_short_description: 'Generated technical documentation',
+        is_updated_latest: true,
+        llms_txt_storage: 'r2://llmstxt-files-bucket/docs.generated.com/llms.txt',
+        llms_full_txt_storage: null,
+        status: EntryStatus.COMPLETED,
+        created_at: '2026-11-01T10:00:00.000Z',
+        updated_at: '2026-11-14T14:22:10.000Z',
+      };
+
+      const formattedNull = formatEntryStorageUrls(entryWithNullFull);
+      assert.equal(formattedNull.llm_txt, 'http://localhost:4000/storage/docs.generated.com/llms.txt');
+
+      const entryWithEmptyFull: SiteEntry = {
+        ...entryWithNullFull,
+        llms_full_txt_storage: '   ',
+      };
+
+      const formattedEmpty = formatEntryStorageUrls(entryWithEmptyFull);
+      assert.equal(formattedEmpty.llm_txt, 'http://localhost:4000/storage/docs.generated.com/llms.txt');
+    });
+
+    it('returns llms.txt for official websites where the site already has one', () => {
+      const officialEntry: SiteEntry = {
+        id: '00000000-0000-0000-0000-000000000001',
+        website_name: 'FastAPI',
+        website_url: 'https://fastapi.tiangolo.com',
+        website_short_description: 'FastAPI framework',
+        is_updated_latest: true,
+        llms_txt_storage: 'https://fastapi.tiangolo.com/llms.txt',
+        llms_full_txt_storage: 'https://fastapi.tiangolo.com/llms-full.txt',
+        status: EntryStatus.COMPLETED,
+        created_at: '2026-11-01T10:00:00.000Z',
+        updated_at: '2026-11-14T14:22:10.000Z',
+      };
+
+      const formatted = formatEntryStorageUrls(officialEntry);
+      assert.equal(formatted.llm_txt, 'https://fastapi.tiangolo.com/llms.txt');
+      assert.equal(formatted.llms_txt_storage, 'https://fastapi.tiangolo.com/llms.txt');
+      assert.equal(formatted.llms_full_txt_storage, 'https://fastapi.tiangolo.com/llms-full.txt');
     });
   });
 });

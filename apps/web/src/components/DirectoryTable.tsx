@@ -1,3 +1,4 @@
+import React from 'react';
 import { type SiteEntry, isGeneratedEntry } from '@llmstxt/shared-types';
 
 // Props for the directory table.
@@ -24,7 +25,11 @@ export function resolveLlmTxtUrl(entry: SiteEntry): string {
     // For websites where we generated llms (rather than the website already having one),
     // return the llms-full.txt file instead of the llms.txt file on the home page.
     const fullStorage = entry.llms_full_txt_storage?.trim() || '';
-    if (fullStorage && (fullStorage.startsWith('http://') || fullStorage.startsWith('https://'))) {
+    if (
+      fullStorage &&
+      (fullStorage.startsWith('http://') || fullStorage.startsWith('https://')) &&
+      (fullStorage.includes('llms-full.txt') || fullStorage.includes('llms-full/txt'))
+    ) {
       return fullStorage;
     }
 
