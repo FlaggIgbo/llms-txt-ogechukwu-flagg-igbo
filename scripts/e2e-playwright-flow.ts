@@ -13,8 +13,12 @@ const isRemote = Boolean(TARGET_URL);
 if (!isRemote) {
   process.env.DATABASE_URL =
     process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/llmstxt_directory';
-  process.env.STORAGE_PROVIDER = 'local';
-  process.env.LOCAL_STORAGE_DIR = path.resolve(process.cwd(), 'data/storage');
+  process.env.STORAGE_PROVIDER = process.env.STORAGE_PROVIDER || 'minio';
+  process.env.S3_ENDPOINT = process.env.S3_ENDPOINT || 'http://localhost:9000';
+  process.env.S3_PUBLIC_URL = process.env.S3_PUBLIC_URL || 'http://localhost:9000';
+  process.env.AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID || 'minioadmin';
+  process.env.AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY || 'minioadmin';
+  process.env.R2_LLMS_TXT_BUCKET = process.env.R2_LLMS_TXT_BUCKET || 'llmstxt-files-bucket';
   process.env.PORT = '4000';
 }
 
@@ -47,13 +51,13 @@ async function main() {
   let viteServer: ViteDevServer | null = null;
 
   if (!isRemote) {
-    // Clean any previous test rows for developer.mozilla.org or plaid.com/docs
+    // Clean any previous test rows for docs.python.org or docs.stripe.com
     const { db } = await import('../packages/database/index.js');
     try {
-      const existingMdn = await db.getEntryByUrl('https://developer.mozilla.org');
-      if (existingMdn) await db.deleteEntry(existingMdn.id);
-      const existingPlaid = await db.getEntryByUrl('https://plaid.com/docs');
-      if (existingPlaid) await db.deleteEntry(existingPlaid.id);
+      const existingPython = await db.getEntryByUrl('https://docs.python.org');
+      if (existingPython) await db.deleteEntry(existingPython.id);
+      const existingStripe = await db.getEntryByUrl('https://docs.stripe.com');
+      if (existingStripe) await db.deleteEntry(existingStripe.id);
     } catch {
       // Ignore cleanup error
     }
@@ -87,11 +91,12 @@ async function main() {
     fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
   }
 
-  // 3. Launch Headed Browser with Video Recording
-  console.log('🌐 Step 3: Launching Chromium browser (headed / visible)...');
+  // 3. Launch Browser with Video Recording
+  const isHeadless = process.env.HEADLESS === 'true' || process.env.CI === 'true';
+  console.log(`🌐 Step 3: Launching Chromium browser (headless: ${isHeadless})...`);
   const browser: Browser = await chromium.launch({
-    headless: false,
-    slowMo: 450, // Deliberate pacing so user sees every action in real time
+    headless: isHeadless,
+    slowMo: isHeadless ? 0 : 450, // Deliberate pacing when visible so user sees every action
   });
 
   const context: BrowserContext = await browser.newContext({
@@ -206,15 +211,15 @@ async function main() {
     console.log('   ✅ Client-side form validations verified');
 
     // -------------------------------------------------------------
-    // TEST SUITE 5: Submit developer.mozilla.org (No existing llms.txt)
+    // TEST SUITE 5: Submit docs.python.org (No existing llms.txt)
     // -------------------------------------------------------------
-    console.log('\n--- [TEST 5] Submitting developer.mozilla.org (Crawls & Generates llms.txt) ---');
-    await page.fill('#product-name', 'MDN Web Docs');
-    await page.fill('#website-url', 'https://developer.mozilla.org');
-    await page.fill('#additional-notes', 'Resources for developers, by developers');
+    console.log('\n--- [TEST 5] Submitting docs.python.org (Crawls & Generates llms.txt) ---');
+    await page.fill('#product-name', 'Python Docs');
+    await page.fill('#website-url', 'https://docs.python.org');
+    await page.fill('#additional-notes', 'Official Python documentation and language reference');
     await sleep(600);
 
-    console.log('   Submitting form for https://developer.mozilla.org...');
+    console.log('   Submitting form for https://docs.python.org...');
     await page.click('button[type="submit"]');
     await sleep(1500);
 
@@ -237,14 +242,14 @@ async function main() {
     console.log('   Switched to Updates page.');
 
     console.log('   Waiting for background worker to process and complete entry...');
-    let mdnCompleted = false;
+    let pythonCompleted = false;
     for (let sec = 0; sec < 40; sec++) {
       if (!isRemote) {
         const { db } = await import('../packages/database/index.js');
-        const entry = await db.getEntryByUrl('https://developer.mozilla.org');
+        const entry = await db.getEntryByUrl('https://docs.python.org');
         if (entry && entry.status === EntryStatus.COMPLETED) {
-          console.log(`   🎉 developer.mozilla.org COMPLETED!`);
-          mdnCompleted = true;
+          console.log(`   🎉 docs.python.org COMPLETED!`);
+          pythonCompleted = true;
           break;
         }
       } else {
@@ -254,62 +259,62 @@ async function main() {
           await refreshBtn.click().catch(() => {});
         }
         await sleep(1000);
-        const activeMdnRows = page
+        const activePythonRows = page
           .locator('.updates-page tr, .updates-page .directory-card')
-          .filter({ hasText: 'developer.mozilla.org' })
+          .filter({ hasText: 'docs.python.org' })
           .filter({ has: page.locator('.status-pending, .status-processing') });
-        const activeCount = await activeMdnRows.count();
+        const activeCount = await activePythonRows.count();
         if (activeCount > 0) {
-          console.log(`   [Queue] developer.mozilla.org actively processing in updates queue...`);
+          console.log(`   [Queue] docs.python.org actively processing in updates queue...`);
         } else {
-          mdnCompleted = true;
+          pythonCompleted = true;
           const updatesText = await page.textContent('.updates-page');
-          if (updatesText?.includes('developer.mozilla.org') && updatesText?.includes('already exists')) {
-            console.log(`   ℹ️ developer.mozilla.org already existed in production DB (duplicate tag verified)!`);
+          if (updatesText?.includes('docs.python.org') && updatesText?.includes('already exists')) {
+            console.log(`   ℹ️ docs.python.org already existed in production DB (duplicate tag verified)!`);
           } else {
-            console.log(`   🎉 developer.mozilla.org processed and completed!`);
+            console.log(`   🎉 docs.python.org processed and completed!`);
           }
           break;
         }
       }
       await sleep(1500);
     }
-    console.log('   ✅ developer.mozilla.org workflow verified');
+    console.log('   ✅ docs.python.org workflow verified');
 
     // -------------------------------------------------------------
-    // TEST SUITE 6: Submit plaid.com/docs (Has live llms.txt)
+    // TEST SUITE 6: Submit docs.stripe.com (Has live llms.txt)
     // -------------------------------------------------------------
-    console.log('\n--- [TEST 6] Submitting plaid.com/docs (Has Live llms.txt) ---');
+    console.log('\n--- [TEST 6] Submitting docs.stripe.com (Has Live llms.txt) ---');
     await page.click('button[role="tab"]:has-text("Add Entry")');
     await sleep(600);
 
-    await page.fill('#product-name', 'Plaid');
-    await page.fill('#website-url', 'https://plaid.com/docs');
-    await page.fill('#additional-notes', 'The API platform for financial services');
+    await page.fill('#product-name', 'Stripe Docs');
+    await page.fill('#website-url', 'https://docs.stripe.com');
+    await page.fill('#additional-notes', 'Financial infrastructure documentation for the internet');
     await sleep(600);
 
-    console.log('   Submitting form for https://plaid.com/docs...');
+    console.log('   Submitting form for https://docs.stripe.com...');
     await page.click('button[type="submit"]');
     await sleep(1500);
 
-    const plaidSuccess = await page.textContent('.form-success-banner');
-    console.log(`   Success banner verified: ${Boolean(plaidSuccess?.includes('Entry submitted successfully'))}`);
+    const stripeSuccess = await page.textContent('.form-success-banner');
+    console.log(`   Success banner verified: ${Boolean(stripeSuccess?.includes('Entry submitted successfully'))}`);
 
-    const plaidViewUpdates = page.locator('.view-updates-link');
-    if (await plaidViewUpdates.isVisible()) {
-      await plaidViewUpdates.click();
+    const stripeViewUpdates = page.locator('.view-updates-link');
+    if (await stripeViewUpdates.isVisible()) {
+      await stripeViewUpdates.click();
     } else {
       await page.click('button[role="tab"]:has-text("Updates")');
     }
     await sleep(800);
 
-    console.log('   Waiting for worker to process plaid.com/docs...');
+    console.log('   Waiting for worker to process docs.stripe.com...');
     for (let sec = 0; sec < 30; sec++) {
       if (!isRemote) {
         const { db } = await import('../packages/database/index.js');
-        const entry = await db.getEntryByUrl('https://plaid.com/docs');
+        const entry = await db.getEntryByUrl('https://docs.stripe.com');
         if (entry && entry.status === EntryStatus.COMPLETED) {
-          console.log(`   🎉 plaid.com/docs COMPLETED!`);
+          console.log(`   🎉 docs.stripe.com COMPLETED!`);
           break;
         }
       } else {
@@ -318,26 +323,26 @@ async function main() {
           await refreshBtn.click().catch(() => {});
         }
         await sleep(1000);
-        const activePlaidRows = page
+        const activeStripeRows = page
           .locator('.updates-page tr, .updates-page .directory-card')
-          .filter({ hasText: 'plaid.com/docs' })
+          .filter({ hasText: 'docs.stripe.com' })
           .filter({ has: page.locator('.status-pending, .status-processing') });
-        const activeCount = await activePlaidRows.count();
+        const activeCount = await activeStripeRows.count();
         if (activeCount > 0) {
-          console.log(`   [Queue] plaid.com/docs actively processing in updates queue...`);
+          console.log(`   [Queue] docs.stripe.com actively processing in updates queue...`);
         } else {
           const updatesText = await page.textContent('.updates-page');
-          if (updatesText?.includes('plaid.com/docs') && updatesText?.includes('already exists')) {
-            console.log(`   ℹ️ plaid.com/docs already existed in production DB (duplicate tag verified)!`);
+          if (updatesText?.includes('docs.stripe.com') && updatesText?.includes('already exists')) {
+            console.log(`   ℹ️ docs.stripe.com already existed in production DB (duplicate tag verified)!`);
           } else {
-            console.log(`   🎉 plaid.com/docs processed and completed!`);
+            console.log(`   🎉 docs.stripe.com processed and completed!`);
           }
           break;
         }
       }
       await sleep(1500);
     }
-    console.log('   ✅ plaid.com/docs live llms.txt workflow verified');
+    console.log('   ✅ docs.stripe.com live llms.txt workflow verified');
 
     // -------------------------------------------------------------
     // TEST SUITE 7: Verify Directory Table & Links to .txt
@@ -353,22 +358,22 @@ async function main() {
       await sleep(800);
     }
 
-    // Search and verify Plaid
-    await searchInput.fill('Plaid');
+    // Search and verify Stripe
+    await searchInput.fill('Stripe');
     await sleep(800);
-    const plaidFound = (await page.locator('.table-row').count()) > 0;
-    console.log(`   Directory search "Plaid" found: ${plaidFound}`);
-    if (!plaidFound) {
-      throw new Error('Expected Plaid (https://plaid.com/docs) to be COMPLETED and visible in Directory');
+    const stripeFound = (await page.locator('.table-row').count()) > 0;
+    console.log(`   Directory search "Stripe" found: ${stripeFound}`);
+    if (!stripeFound) {
+      throw new Error('Expected Stripe (https://docs.stripe.com) to be COMPLETED and visible in Directory');
     }
 
-    // Search and verify MDN Web Docs
-    await searchInput.fill('MDN');
+    // Search and verify Python Docs
+    await searchInput.fill('Python');
     await sleep(800);
-    const mdnFound = (await page.locator('.table-row').count()) > 0;
-    console.log(`   Directory search "MDN" found: ${mdnFound}`);
-    if (!mdnFound) {
-      throw new Error('Expected MDN Web Docs (https://developer.mozilla.org) to be COMPLETED and visible in Directory');
+    const pythonFound = (await page.locator('.table-row').count()) > 0;
+    console.log(`   Directory search "Python" found: ${pythonFound}`);
+    if (!pythonFound) {
+      throw new Error('Expected Python Docs (https://docs.python.org) to be COMPLETED and visible in Directory');
     }
 
     // Clear search and count total
@@ -385,9 +390,9 @@ async function main() {
     await page.click('button[role="tab"]:has-text("Add Entry")');
     await sleep(600);
 
-    // Re-submit https://plaid.com/docs
-    await page.fill('#product-name', 'Plaid Duplicate Test');
-    await page.fill('#website-url', 'https://plaid.com/docs');
+    // Re-submit https://docs.stripe.com
+    await page.fill('#product-name', 'Stripe Duplicate Test');
+    await page.fill('#website-url', 'https://docs.stripe.com');
     await page.click('button[type="submit"]');
     await sleep(1000);
 
