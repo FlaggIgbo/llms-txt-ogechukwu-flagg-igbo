@@ -13,12 +13,7 @@ const isRemote = Boolean(TARGET_URL);
 if (!isRemote) {
   process.env.DATABASE_URL =
     process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/llmstxt_directory';
-  process.env.STORAGE_PROVIDER = process.env.STORAGE_PROVIDER || 'minio';
-  process.env.S3_ENDPOINT = process.env.S3_ENDPOINT || 'http://localhost:9000';
-  process.env.S3_PUBLIC_URL = process.env.S3_PUBLIC_URL || 'http://localhost:9000';
-  process.env.AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID || 'minioadmin';
-  process.env.AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY || 'minioadmin';
-  process.env.R2_LLMS_TXT_BUCKET = process.env.R2_LLMS_TXT_BUCKET || 'llmstxt-files-bucket';
+  process.env.STORAGE_PROVIDER = process.env.STORAGE_PROVIDER || 'r2';
   process.env.PORT = '4000';
 }
 
@@ -256,7 +251,7 @@ async function main() {
         // In remote mode: check if the entry is still PENDING/PROCESSING or if it completed / already existed
         const refreshBtn = page.locator('.updates-page .refresh-button');
         if (await refreshBtn.isVisible()) {
-          await refreshBtn.click().catch(() => {});
+          await refreshBtn.click().catch(() => { });
         }
         await sleep(1000);
         const activePythonRows = page
@@ -320,7 +315,7 @@ async function main() {
       } else {
         const refreshBtn = page.locator('.updates-page .refresh-button');
         if (await refreshBtn.isVisible()) {
-          await refreshBtn.click().catch(() => {});
+          await refreshBtn.click().catch(() => { });
         }
         await sleep(1000);
         const activeStripeRows = page
