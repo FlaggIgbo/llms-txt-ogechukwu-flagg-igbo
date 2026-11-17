@@ -19,9 +19,13 @@
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down",
-    "db:migrate": "npm run db:migrate --workspace=@llmstxt/database"
+    "db:migrate": "npm run db:migrate --workspace=@llmstxt/database",
+    "screenshots": "tsx scripts/generate-screenshots.ts",
+    "screenshots:check": "./scripts/pre-push-screenshots.sh"
   },
   "devDependencies": {
+    "playwright": "^1.65.1",
+    "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   },
   "engines": {
