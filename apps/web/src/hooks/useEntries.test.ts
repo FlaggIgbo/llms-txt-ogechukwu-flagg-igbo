@@ -32,7 +32,8 @@ import {
   ApiErrorMessage,
 } from '@llmstxt/shared-types';
 import { handlePostEntry } from '../../../../apps/api/src/routes/entries.js';
-import { App } from '../App.js';
+import { App, parseTabFromHash, getInitialTab } from '../App.js';
+import { ErrorBoundary } from '../components/ErrorBoundary.js';
 
 describe('useEntries and MOCK_SEED_ENTRIES', () => {
   describe('MOCK_SEED_ENTRIES', () => {
@@ -436,7 +437,7 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
     });
   });
 
-  describe('App with three tabs', () => {
+  describe('App with three tabs and hash routing', () => {
     it('renders three navigation tabs at the top', () => {
       const html = renderToString(React.createElement(App));
 
@@ -444,6 +445,82 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
       assert.ok(html.includes('Directory'));
       assert.ok(html.includes('Add Entry'));
       assert.ok(html.includes('Updates'));
+    });
+
+    it('resolves valid URL hashes accurately with strict exact matching', () => {
+      assert.equal(parseTabFromHash(''), 'home');
+      assert.equal(parseTabFromHash('#'), 'home');
+      assert.equal(parseTabFromHash('#home'), 'home');
+      assert.equal(parseTabFromHash('#/home'), 'home');
+      assert.equal(parseTabFromHash('#add'), 'add');
+      assert.equal(parseTabFromHash('#/add'), 'add');
+      assert.equal(parseTabFromHash('#updates'), 'updates');
+      assert.equal(parseTabFromHash('#/updates'), 'updates');
+    });
+
+    it('throws an error for unrecognized URL hash such as #address', () => {
+      assert.throws(
+        () => parseTabFromHash('#address'),
+        /Invalid URL hash: "#address". Valid hashes are: #home, #add, #updates/
+      );
+    });
+
+    it('reads initial tab from window.location.hash with getInitialTab()', () => {
+      (globalThis as any).window = {
+        location: { hash: '#add' },
+      };
+      assert.equal(getInitialTab(), 'add');
+
+      (globalThis as any).window = {
+        location: { hash: '#address' },
+      };
+      assert.throws(
+        () => getInitialTab(),
+        /Invalid URL hash: "#address"/
+      );
+
+      delete (globalThis as any).window;
+    });
+
+    it('renders ErrorBoundary with "Return to Directory" button when an error is caught', () => {
+      const boundary = new ErrorBoundary({ children: null });
+      const derivedState = ErrorBoundary.getDerivedStateFromError(
+        new Error('Invalid URL hash: "#address". Valid hashes are: #home, #add, #updates')
+      );
+      assert.equal(derivedState.hasError, true);
+      assert.equal(
+        derivedState.error?.message,
+        'Invalid URL hash: "#address". Valid hashes are: #home, #add, #updates'
+      );
+
+      boundary.state = derivedState;
+      const html = renderToString(boundary.render() as React.ReactElement);
+      assert.ok(html.includes('Something went wrong'));
+      assert.ok(html.includes('Invalid URL hash:'));
+      assert.ok(html.includes('#address'));
+      assert.ok(html.includes('Return to Directory'));
+    });
+
+    it('clears window.location.hash and triggers onReset when Return to Directory is clicked', () => {
+      let resetCalled = false;
+      const boundary = new ErrorBoundary({
+        children: null,
+        onReset: () => {
+          resetCalled = true;
+        },
+      });
+      (globalThis as any).window = {
+        location: {
+          hash: '#address',
+        },
+      };
+
+      boundary.handleReturnToDirectory();
+
+      assert.equal((globalThis as any).window.location.hash, '');
+      assert.equal(resetCalled, true);
+
+      delete (globalThis as any).window;
     });
   });
 
