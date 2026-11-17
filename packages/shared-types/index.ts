@@ -122,6 +122,13 @@ export interface GenerateJobPayload {
 // Status of a cadence check.
 export type CadenceStatus = 'idle' | 'queued' | 'processing';
 
+// Standard section names for llms.txt files (per https://llmstxt.org/ specification).
+export enum SectionName {
+  DOCS = 'Docs',
+  API_REFERENCE = 'API Reference',
+  OPTIONAL = 'Optional',
+}
+
 // Known category types for a website. This should be updated manually as more
 // websites llm files are generated
 export enum SiteCategory {

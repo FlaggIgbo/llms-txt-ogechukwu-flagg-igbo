@@ -10,6 +10,7 @@ import {
   validateLlmsFullTxt,
   assertValidLlmsFiles,
   SiteCategory,
+  SectionName,
 } from './llmsGenerator.js';
 import { computeNextCadence } from './cadenceCalculator.js';
 import type { ScrapedPage } from './scraper.js';
@@ -27,7 +28,7 @@ test('formatLlmsTxt: strictly follows https://llmstxt.org/ structure', () => {
     'A lightweight tool for building modern applications.',
     [
       {
-        name: 'Docs',
+        name: SectionName.DOCS,
         links: [
           {
             title: 'Quickstart',
@@ -37,7 +38,7 @@ test('formatLlmsTxt: strictly follows https://llmstxt.org/ structure', () => {
         ],
       },
       {
-        name: 'Optional',
+        name: SectionName.OPTIONAL,
         links: [
           {
             title: 'Changelog',
@@ -141,6 +142,12 @@ test('formatLlmsFullTxt: renders failure placeholders when subpages fail to craw
   const fullTxt = formatLlmsFullTxt(page.title, page.description, page);
   assert.ok(fullTxt.includes('## Authentication\nURL: https://example.com/auth'));
   assert.ok(fullTxt.includes('*[Content could not be automatically retrieved (HTTP 403 Forbidden)]*'));
+});
+
+test('SectionName: exports canonical llms.txt standard section names', () => {
+  assert.equal(SectionName.DOCS, 'Docs');
+  assert.equal(SectionName.API_REFERENCE, 'API Reference');
+  assert.equal(SectionName.OPTIONAL, 'Optional');
 });
 
 test('getInitialIntervalForCategory: returns standard seed cadence intervals', () => {

@@ -1,10 +1,10 @@
 import { logWarn } from '@llmstxt/logger';
-import { SiteCategory } from '@llmstxt/shared-types';
+import { SiteCategory, SectionName } from '@llmstxt/shared-types';
 import type { GoogleGenAI } from '@google/genai';
 import type { ScrapedPage } from './scraper.js';
 
 // Known category types for a website.
-export { SiteCategory };
+export { SiteCategory, SectionName };
 export const KNOWN_CATEGORIES = Object.values(SiteCategory);
 
 // Default re-check interval (hours) per site category.
@@ -42,7 +42,7 @@ export interface SectionLink {
 
 // A group of links under a section header (e.g. ## Docs).
 export interface CategorizedSection {
-  name: string;
+  name: SectionName | string;
   links: SectionLink[];
 }
 
@@ -69,7 +69,7 @@ const normalizeUrl = (url: string) => url.toLowerCase().replace(/\/+$/, '');
 
 const isOptionalSection = (name: string) => {
   const n = name.toLowerCase();
-  return n === 'optional' || n.includes('additional');
+  return n === SectionName.OPTIONAL.toLowerCase() || n.includes('additional');
 };
 
 function getCrawledUrlSet(scraped: ScrapedPage): Set<string> {
@@ -81,7 +81,7 @@ function appendToOptional(sections: CategorizedSection[], links: SectionLink[]):
   if (links.length === 0) return;
   const existing = sections.find((s) => isOptionalSection(s.name));
   if (existing) existing.links.push(...links);
-  else sections.push({ name: 'Optional', links });
+  else sections.push({ name: SectionName.OPTIONAL, links });
 }
 
 function markNotCompiled(link: SectionLink): SectionLink {
@@ -108,21 +108,21 @@ export function cleanProjectTitle(rawTitle: string): string {
 // ---------------------------------------------------------------------------
 
 // Choose a section name based on URL keywords.
-function getSectionNameFromUrl(url: string, title: string): string {
+function getSectionNameFromUrl(url: string, title: string): SectionName | string {
   const lowerUrl = url.toLowerCase();
   const lowerTitle = title.toLowerCase();
 
   if (hasAny(lowerUrl, ['api', 'ref']) || lowerTitle.includes('api')) {
-    return 'API Reference';
+    return SectionName.API_REFERENCE;
   }
   if (
     hasAny(lowerUrl, ['doc', 'guide', 'tutorial', 'getting-started', 'quickstart']) ||
     lowerTitle.includes('doc')
   ) {
-    return 'Docs';
+    return SectionName.DOCS;
   }
   if (hasAny(lowerUrl, ['community', 'discord', 'blog', 'changelog', 'release'])) {
-    return 'Optional';
+    return SectionName.OPTIONAL;
   }
 
   try {
@@ -131,7 +131,7 @@ function getSectionNameFromUrl(url: string, title: string): string {
   } catch {
     // Ignore invalid URLs.
   }
-  return 'Docs';
+  return SectionName.DOCS;
 }
 
 function detectSiteCategory(scraped: ScrapedPage): SiteCategory {
