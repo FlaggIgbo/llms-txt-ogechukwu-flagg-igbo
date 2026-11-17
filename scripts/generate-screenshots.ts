@@ -145,17 +145,17 @@ export async function generateScreenshots(): Promise<string[]> {
   mkdirSync(COMPONENTS_DIR, { recursive: true });
   mkdirSync(PAGES_DIR, { recursive: true });
 
-  // 1. Start ephemeral Vite dev server
-  const serverPort = 5198;
+  // 1. Start ephemeral Vite dev server on an available port
   const server: ViteDevServer = await createServer({
     root: WEB_DIR,
     server: {
-      port: serverPort,
-      strictPort: true,
+      port: 0, // Let OS pick an available ephemeral port to avoid collisions
     },
     logLevel: 'warn',
   });
   await server.listen();
+  const address = server.httpServer?.address();
+  const serverPort = typeof address === 'object' && address ? address.port : 5198;
   const baseUrl = `http://localhost:${serverPort}`;
   console.log(`📡 Local preview server running at ${baseUrl}`);
 
