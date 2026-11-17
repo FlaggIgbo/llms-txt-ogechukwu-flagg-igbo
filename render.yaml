@@ -36,21 +36,11 @@ services:
         fromDatabase:
           name: llmstxt-postgres
           property: connectionString
-      - key: DATABASE_SSL_REJECT_UNAUTHORIZED
-        value: "false"
       - key: STORAGE_PROVIDER
         value: r2
-      - key: LOCAL_STORAGE_DIR
-        value: /tmp/storage
       - key: R2_LLMS_TXT_BUCKET
         value: llmstxt-files-bucket
-      - key: R2_UPDATE_LOGS_BUCKET
-        value: llmstxt-update-logs-bucket
       - key: CLOUDFLARE_ACCOUNT_ID
-        sync: false
-      - key: R2_ACCESS_KEY_ID
-        sync: false
-      - key: R2_SECRET_ACCESS_KEY
         sync: false
       - key: R2_PUBLIC_URL
         sync: false
@@ -69,8 +59,6 @@ services:
         fromDatabase:
           name: llmstxt-postgres
           property: connectionString
-      - key: DATABASE_SSL_REJECT_UNAUTHORIZED
-        value: "false"
       - key: GEMINI_API_KEY
         sync: false
       - key: STORAGE_PROVIDER
@@ -79,15 +67,11 @@ services:
         value: /tmp/storage
       - key: R2_LLMS_TXT_BUCKET
         value: llmstxt-files-bucket
-      - key: R2_UPDATE_LOGS_BUCKET
-        value: llmstxt-update-logs-bucket
       - key: CLOUDFLARE_ACCOUNT_ID
         sync: false
       - key: R2_ACCESS_KEY_ID
         sync: false
       - key: R2_SECRET_ACCESS_KEY
-        sync: false
-      - key: R2_PUBLIC_URL
         sync: false
       - key: SENTRY_DSN
         sync: false
@@ -104,7 +88,5 @@ services:
         fromDatabase:
           name: llmstxt-postgres
           property: connectionString
-      - key: DATABASE_SSL_REJECT_UNAUTHORIZED
-        value: "false"
       - key: SENTRY_DSN
         sync: false

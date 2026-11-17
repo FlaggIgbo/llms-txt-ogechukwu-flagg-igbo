@@ -1,7 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { logWarn } from '@llmstxt/logger';
 import { assertValidLlmsFiles } from './llmsValidator.js';
 
@@ -20,7 +19,7 @@ export interface R2Config {
   secretAccessKey: string;
 }
 
-export type StorageConfig = { kind: 'local' } | ({ kind: 'r2' } & R2Config);
+export type StorageConfig = { kind: 'r2' } & R2Config;
 
 const MAX_FOLDER_NAME_LENGTH = 200;
 const PUT_TIMEOUT_MS = 30_000;
@@ -71,13 +70,11 @@ const encodeObjectKey = (key: string): string =>
 //
 //   STORAGE_PROVIDER      "minio" (development) or "r2" (production)
 //   CLOUDFLARE_ACCOUNT_ID used to build the R2 endpoint
-//   R2_ENDPOINT           optional endpoint override (e.g. a local emulator)
-//   R2_REGION             optional, defaults to "auto"
 //   R2_LLMS_TXT_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
 export function resolveStorageConfig(env: NodeJS.ProcessEnv = process.env): StorageConfig {
   const provider = (env.STORAGE_PROVIDER || 'minio').trim().toLowerCase();
   if (provider === 'minio') {
-    const endpoint = env.S3_ENDPOINT || env.R2_ENDPOINT || 'http://localhost:9000';
+    const endpoint = env.S3_ENDPOINT || 'http://localhost:9000';
     const bucket = env.R2_LLMS_TXT_BUCKET || 'llmstxt-files-bucket';
     const accessKeyId = env.AWS_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID || 'minioadmin';
     const secretAccessKey = env.AWS_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY || 'minioadmin';
@@ -85,7 +82,7 @@ export function resolveStorageConfig(env: NodeJS.ProcessEnv = process.env): Stor
     return {
       kind: 'r2',
       endpoint,
-      region: env.R2_REGION || 'us-east-1',
+      region: 'us-east-1',
       bucket,
       accessKeyId,
       secretAccessKey,
@@ -96,14 +93,13 @@ export function resolveStorageConfig(env: NodeJS.ProcessEnv = process.env): Stor
   }
 
   const accountId = env.CLOUDFLARE_ACCOUNT_ID;
-  const endpoint =
-    env.R2_ENDPOINT || (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : undefined);
+  const endpoint = accountId ? `https://${accountId}.r2.cloudflarestorage.com` : undefined;
   const bucket = env.R2_LLMS_TXT_BUCKET;
   const accessKeyId = env.R2_ACCESS_KEY_ID;
   const secretAccessKey = env.R2_SECRET_ACCESS_KEY;
 
   const missing: string[] = [];
-  if (!endpoint) missing.push('CLOUDFLARE_ACCOUNT_ID (or R2_ENDPOINT)');
+  if (!endpoint) missing.push('CLOUDFLARE_ACCOUNT_ID');
   if (!bucket) missing.push('R2_LLMS_TXT_BUCKET');
   if (!accessKeyId) missing.push('R2_ACCESS_KEY_ID');
   if (!secretAccessKey) missing.push('R2_SECRET_ACCESS_KEY');
@@ -115,7 +111,7 @@ export function resolveStorageConfig(env: NodeJS.ProcessEnv = process.env): Stor
   return {
     kind: 'r2',
     endpoint,
-    region: env.R2_REGION || 'auto',
+    region: 'auto',
     bucket,
     accessKeyId,
     secretAccessKey,
@@ -230,14 +226,6 @@ export async function uploadToStorage(
   const config = resolveStorageConfig();
   const folderName = cleanUrlForFolder(websiteUrl);
 
-  if (config.kind === 'local') {
-    const { llmsTxtPath, llmsFullTxtPath } = await writeLocalFiles(folderName, llmsTxt, llmsFullTxt);
-    return {
-      llmsTxtUri: pathToFileURL(llmsTxtPath).href,
-      llmsFullTxtUri: pathToFileURL(llmsFullTxtPath).href,
-    };
-  }
-
   const txtKey = `${folderName}/llms.txt`;
   const fullTxtKey = `${folderName}/llms-full.txt`;
 
@@ -256,6 +244,3 @@ export async function uploadToStorage(
     llmsFullTxtUri: `r2://${config.bucket}/${fullTxtKey}`,
   };
 }
-
-/** @deprecated Misleading name: this also handles local storage. Use `uploadToStorage`. */
-export const uploadToR2 = uploadToStorage;

@@ -1,18 +1,7 @@
-const SENTRY_DSN = process.env.SENTRY_DSN;
-
-// Check if running in local development or test mode.
-function checkIsDev(): boolean {
-  if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') return true;
-  if (!process.env.NODE_ENV && !process.env.SENTRY_ENVIRONMENT) return true;
-  return false;
-}
-
-const isDev = checkIsDev();
 let sentryClient: any = null;
 
-// Lazily load Sentry only when needed outside dev/test.
-async function getSentryClient(): Promise<any> {
-  if (isDev) return null;
+// Lazily load Sentry module.
+export async function getSentryClient(): Promise<any> {
   if (!sentryClient) {
     try {
       sentryClient = await import('@sentry/node');
@@ -23,53 +12,63 @@ async function getSentryClient(): Promise<any> {
   return sentryClient;
 }
 
-// Initialize Sentry error tracking.
-export async function initSentry(): Promise<void> {
-  if (isDev) return;
+// Initialize Sentry error tracking if a DSN is available.
+export async function initSentry(customDsn?: string): Promise<any> {
+  const dsn = customDsn || process.env.SENTRY_DSN;
+  if (!dsn) return null;
+
   const sentry = await getSentryClient();
-  sentry?.init({
-    dsn: SENTRY_DSN,
-    environment: process.env.NODE_ENV || 'production',
-    tracesSampleRate: 0.1,
-  });
+  if (sentry && !sentry.isInitialized?.()) {
+    sentry.init({
+      dsn,
+      environment: process.env.NODE_ENV || 'production',
+      tracesSampleRate: 0.1,
+    });
+  }
+  return sentry;
 }
 
-// Log an info message (console in dev, Sentry in prod).
+// Log an info message (console + Sentry if initialized).
 export function logInfo(message: string, ...optionalParams: unknown[]): void {
-  if (isDev) {
-    console.log(message, ...optionalParams);
-  } else {
+  console.log(message, ...optionalParams);
+  if (process.env.SENTRY_DSN) {
     void getSentryClient().then((sentry) => {
-      sentry?.captureMessage(message, 'info');
+      if (sentry?.isInitialized?.()) {
+        sentry.captureMessage(message, 'info');
+      }
     });
   }
 }
 
-// Log a warning message (console in dev, Sentry in prod).
+// Log a warning message (console + Sentry if initialized).
 export function logWarn(message: string, ...optionalParams: unknown[]): void {
-  if (isDev) {
-    console.warn(message, ...optionalParams);
-  } else {
+  console.warn(message, ...optionalParams);
+  if (process.env.SENTRY_DSN) {
     void getSentryClient().then((sentry) => {
-      sentry?.captureMessage(message, 'warning');
+      if (sentry?.isInitialized?.()) {
+        sentry.captureMessage(message, 'warning');
+      }
     });
   }
 }
 
-// Log an error (console in dev, Sentry in prod).
+// Log an error (always to console.error + Sentry if available).
 export function logError(error: unknown, context?: Record<string, unknown>): void {
-  if (isDev) {
-    console.error(error);
-    return;
-  }
+  console.error(error, context ? JSON.stringify(context) : '');
 
   void getSentryClient().then((sentry) => {
     if (!sentry) return;
+    if (!sentry.isInitialized?.() && process.env.SENTRY_DSN) {
+      sentry.init({
+        dsn: process.env.SENTRY_DSN,
+        environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'production',
+        tracesSampleRate: 0.1,
+      });
+    }
     if (error instanceof Error) {
       sentry.captureException(error, { extra: context });
     } else {
-      sentry.captureMessage(String(error), 'error');
+      sentry.captureMessage(String(error), { level: 'error', extra: context });
     }
   });
 }
-

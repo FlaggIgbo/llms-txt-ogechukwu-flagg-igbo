@@ -1,76 +1,24 @@
 import { useState, useEffect, useRef } from 'react';
-import { type SiteEntry, type CreateSiteEntryRequest, EntryStatus } from '@llmstxt/shared-types';
+import { type SiteEntry, type CreateSiteEntryRequest, MOCK_SEED_ENTRIES } from '@llmstxt/shared-types';
+
+export { MOCK_SEED_ENTRIES };
 
 // State and actions returned by useEntries.
 export interface UseEntriesResult {
   entries: SiteEntry[];
-  allEntries: SiteEntry[];
   loading: boolean;
   isSearching: boolean;
   error: string | null;
   refresh: () => Promise<void>;
   submitEntry: (payload: CreateSiteEntryRequest) => Promise<unknown>;
   page: number;
-  pageSize: number;
   total: number;
   totalPages: number;
   setPage: (page: number) => void;
 }
 
-// Sample entries for tests and fallback.
-export const MOCK_SEED_ENTRIES: SiteEntry[] = [
-  {
-    id: '00000000-0000-0000-0000-000000000001',
-    website_name: 'FastAPI',
-    website_url: 'https://fastapi.tiangolo.com',
-    website_short_description: 'FastAPI framework, high performance, easy to learn, fast to code, ready for production',
-    is_updated_latest: true,
-    llms_txt_storage: 'https://fastapi.tiangolo.com/llms.txt',
-    llms_full_txt_storage: 'https://fastapi.tiangolo.com/llms-full.txt',
-    status: EntryStatus.COMPLETED,
-    created_at: '2026-11-01T10:00:00.000Z',
-    updated_at: '2026-11-14T14:22:10.000Z',
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000002',
-    website_name: 'Anthropic Docs',
-    website_url: 'https://docs.anthropic.com',
-    website_short_description: 'Anthropic API, Claude models documentation, guides, and SDK reference.',
-    is_updated_latest: true,
-    llms_txt_storage: 'https://docs.anthropic.com/llms.txt',
-    llms_full_txt_storage: 'https://docs.anthropic.com/llms-full.txt',
-    status: EntryStatus.COMPLETED,
-    created_at: '2026-11-02T12:00:00.000Z',
-    updated_at: '2026-11-15T09:15:30.000Z',
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000003',
-    website_name: 'llmstxt.org',
-    website_url: 'https://llmstxt.org',
-    website_short_description: 'The official standard specification for /llms.txt and /llms-full.txt website discovery.',
-    is_updated_latest: true,
-    llms_txt_storage: 'https://llmstxt.org/llms.txt',
-    llms_full_txt_storage: null,
-    status: EntryStatus.COMPLETED,
-    created_at: '2026-10-15T08:30:00.000Z',
-    updated_at: '2026-11-12T18:45:00.000Z',
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000004',
-    website_name: 'Hugging Face',
-    website_url: 'https://huggingface.co',
-    website_short_description: 'The platform where the machine learning community collaborates on models, datasets, and applications.',
-    is_updated_latest: true,
-    llms_txt_storage: 'https://huggingface.co/llms.txt',
-    llms_full_txt_storage: 'https://huggingface.co/llms-full.txt',
-    status: EntryStatus.COMPLETED,
-    created_at: '2026-11-05T16:20:00.000Z',
-    updated_at: '2026-11-15T19:00:00.000Z',
-  },
-];
-
 const env = (import.meta as any).env || {};
-const rawApiBase = String(env.VITE_API_URL || env.VITE_API_BASE_URL || 'http://localhost:4000').trim();
+const rawApiBase = String(env.VITE_API_BASE_URL || 'http://localhost:4000').trim();
 
 // Format API base URL, converting Render internal hostnames (e.g. "llmstxt-api-5yok") to full public URLs.
 export function resolveApiBaseUrl(raw: string): string {
@@ -105,7 +53,6 @@ export function matchesSearch(item: SiteEntry, query: string): boolean {
 // Fetch, filter, search, paginate, and submit directory entries.
 export function useEntries(searchQuery = '', initialPage = 1, pageSize = 50): UseEntriesResult {
   const [entries, setEntries] = useState<SiteEntry[]>([]);
-  const [allEntries, setAllEntries] = useState<SiteEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(initialPage);
   const [loading, setLoading] = useState(true);
@@ -160,7 +107,6 @@ export function useEntries(searchQuery = '', initialPage = 1, pageSize = 50): Us
       }
 
       setEntries(pagedList);
-      setAllEntries(pagedList);
       setTotal(totalCount);
       setError(null);
     } catch (err: unknown) {
@@ -175,7 +121,6 @@ export function useEntries(searchQuery = '', initialPage = 1, pageSize = 50): Us
       const pagedFallback = matched.slice(offset, offset + pageSize);
 
       setEntries(pagedFallback);
-      setAllEntries(pagedFallback);
       setTotal(matched.length);
 
       const message = err instanceof Error ? err.message : 'Failed to fetch';
@@ -236,14 +181,12 @@ export function useEntries(searchQuery = '', initialPage = 1, pageSize = 50): Us
 
   return {
     entries,
-    allEntries,
     loading,
     isSearching,
     error,
     refresh: () => fetchEntries(searchQuery, page),
     submitEntry,
     page,
-    pageSize,
     total,
     totalPages,
     setPage,

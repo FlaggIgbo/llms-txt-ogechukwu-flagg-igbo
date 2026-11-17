@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type Page } from 'playwright';
 import { createServer, type ViteDevServer } from 'vite';
-import { EntryStatus } from '../packages/shared-types/index.js';
+import { EntryStatus, MOCK_SEED_ENTRIES } from '../packages/shared-types/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,56 +13,7 @@ const SCREENSHOTS_DIR = path.resolve(ROOT_DIR, 'screenshots');
 const COMPONENTS_DIR = path.resolve(SCREENSHOTS_DIR, 'components');
 const PAGES_DIR = path.resolve(SCREENSHOTS_DIR, 'pages');
 
-const MOCK_ENTRIES = [
-  {
-    id: '00000000-0000-0000-0000-000000000001',
-    website_name: 'FastAPI',
-    website_url: 'https://fastapi.tiangolo.com',
-    website_short_description: 'FastAPI framework, high performance, easy to learn, fast to code, ready for production',
-    is_updated_latest: true,
-    llms_txt_storage: 'https://fastapi.tiangolo.com/llms.txt',
-    llms_full_txt_storage: 'https://fastapi.tiangolo.com/llms-full.txt',
-    status: EntryStatus.COMPLETED,
-    created_at: '2026-11-01T10:00:00.000Z',
-    updated_at: '2026-11-14T14:22:10.000Z',
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000002',
-    website_name: 'Anthropic Docs',
-    website_url: 'https://docs.anthropic.com',
-    website_short_description: 'Anthropic API, Claude models documentation, guides, and SDK reference.',
-    is_updated_latest: true,
-    llms_txt_storage: 'https://docs.anthropic.com/llms.txt',
-    llms_full_txt_storage: 'https://docs.anthropic.com/llms-full.txt',
-    status: EntryStatus.COMPLETED,
-    created_at: '2026-11-02T12:00:00.000Z',
-    updated_at: '2026-11-15T09:15:30.000Z',
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000003',
-    website_name: 'llmstxt.org',
-    website_url: 'https://llmstxt.org',
-    website_short_description: 'The official standard specification for /llms.txt and /llms-full.txt website discovery.',
-    is_updated_latest: true,
-    llms_txt_storage: 'https://llmstxt.org/llms.txt',
-    llms_full_txt_storage: null,
-    status: EntryStatus.COMPLETED,
-    created_at: '2026-10-15T08:30:00.000Z',
-    updated_at: '2026-11-12T18:45:00.000Z',
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000004',
-    website_name: 'Hugging Face',
-    website_url: 'https://huggingface.co',
-    website_short_description: 'The platform where the machine learning community collaborates on models, datasets, and applications.',
-    is_updated_latest: true,
-    llms_txt_storage: 'https://huggingface.co/llms.txt',
-    llms_full_txt_storage: 'https://huggingface.co/llms-full.txt',
-    status: EntryStatus.COMPLETED,
-    created_at: '2026-11-05T16:20:00.000Z',
-    updated_at: '2026-11-15T19:00:00.000Z',
-  },
-];
+const MOCK_ENTRIES = MOCK_SEED_ENTRIES;
 
 const MOCK_UPDATING_ENTRIES = [
   {

@@ -27,8 +27,3 @@ resource "cloudflare_r2_bucket" "llms_txt_storage" {
   account_id = var.cloudflare_account_id
   name       = "llmstxt-files-bucket"
 }
-
-resource "cloudflare_r2_bucket" "update_logs" {
-  account_id = var.cloudflare_account_id
-  name       = "llmstxt-update-logs-bucket"
-}

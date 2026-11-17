@@ -11,6 +11,7 @@ import {
   SiteCategory,
   ApiErrorCode,
   ApiErrorMessage,
+  MOCK_SEED_ENTRIES,
 } from '@llmstxt/shared-types';
 import {
   ENSURE_SCHEMA_SQL,
@@ -20,9 +21,7 @@ import {
   SEARCH_ENTRIES_FTS_SQL,
   SELECT_ENTRY_BY_ID_SQL,
   SELECT_ENTRY_BY_URL_SQL,
-  INSERT_ENTRY_SQL,
   buildUpdateEntrySql,
-  SELECT_STALE_ENTRIES_SQL,
   INSERT_ENTRY_TRANSACTION_SQL,
   SELECT_CADENCE_BY_SITE_ID_SQL,
   INSERT_CADENCE_TRANSACTION_SQL,
@@ -35,12 +34,11 @@ import {
   FAIL_JOB_DEAD_LETTER_SQL,
   FAIL_JOB_RETRY_SQL,
   SELECT_DEAD_LETTER_JOBS_SQL,
-  SELECT_BACKGROUND_JOBS_BY_STATUS_SQL,
-  SELECT_ALL_BACKGROUND_JOBS_SQL,
   RESET_PROCESSING_JOBS_SQL,
   DELETE_DEAD_LETTER_JOBS_SQL,
-  REPROCESS_DEAD_LETTER_JOBS_SQL,
 } from './queries.js';
+
+export { MOCK_SEED_ENTRIES };
 
 // Database connection URL. Always defaults to Docker PostgreSQL.
 const connectionString =
@@ -63,7 +61,7 @@ function formatJobRow(row: any): BackgroundJob {
   };
 }
 
-// Convert a raw DB row into a SiteCadence.
+  // Convert a raw DB row into a SiteCadence.
 function formatCadenceRow(row: any): SiteCadence {
   return {
     site_id: row.site_id,
@@ -79,58 +77,6 @@ function formatCadenceRow(row: any): SiteCadence {
     status: row.status || 'idle',
   };
 }
-
-// Default rows for seed data and test fixtures.
-export const MOCK_SEED_ENTRIES: SiteEntry[] = [
-  {
-    id: '00000000-0000-0000-0000-000000000001',
-    website_name: 'FastAPI',
-    website_url: 'https://fastapi.tiangolo.com',
-    website_short_description: 'FastAPI framework, high performance, easy to learn, fast to code, ready for production',
-    is_updated_latest: true,
-    llms_txt_storage: 'https://fastapi.tiangolo.com/llms.txt',
-    llms_full_txt_storage: 'https://fastapi.tiangolo.com/llms-full.txt',
-    status: EntryStatus.COMPLETED,
-    created_at: '2026-11-01T10:00:00.000Z',
-    updated_at: '2026-11-14T14:22:10.000Z',
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000002',
-    website_name: 'Anthropic Docs',
-    website_url: 'https://docs.anthropic.com',
-    website_short_description: 'Anthropic API, Claude models documentation, guides, and SDK reference.',
-    is_updated_latest: true,
-    llms_txt_storage: 'https://docs.anthropic.com/llms.txt',
-    llms_full_txt_storage: 'https://docs.anthropic.com/llms-full.txt',
-    status: EntryStatus.COMPLETED,
-    created_at: '2026-11-02T12:00:00.000Z',
-    updated_at: '2026-11-15T09:15:30.000Z',
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000003',
-    website_name: 'llmstxt.org',
-    website_url: 'https://llmstxt.org',
-    website_short_description: 'The official standard specification for /llms.txt and /llms-full.txt website discovery.',
-    is_updated_latest: true,
-    llms_txt_storage: 'https://llmstxt.org/llms.txt',
-    llms_full_txt_storage: null,
-    status: EntryStatus.COMPLETED,
-    created_at: '2026-10-15T08:30:00.000Z',
-    updated_at: '2026-11-12T18:45:00.000Z',
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000004',
-    website_name: 'Hugging Face',
-    website_url: 'https://huggingface.co',
-    website_short_description: 'The platform where the machine learning community collaborates on models, datasets, and applications.',
-    is_updated_latest: true,
-    llms_txt_storage: 'https://huggingface.co/llms.txt',
-    llms_full_txt_storage: 'https://huggingface.co/llms-full.txt',
-    status: EntryStatus.COMPLETED,
-    created_at: '2026-11-05T16:20:00.000Z',
-    updated_at: '2026-11-15T19:00:00.000Z',
-  },
-];
 
 // Remove trailing slashes from a URL.
 function trimTrailingSlashes(url: string): string {
@@ -191,13 +137,11 @@ export class DatabaseClient {
     if (!this.pool) {
       // Local Docker PostgreSQL has no SSL by default
       const isRemote = !connectionString.includes('localhost') && !connectionString.includes('127.0.0.1');
-      const rejectUnauthorized = Boolean(process.env.DATABASE_CA_CERT && process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false');
       this.pool = new pg.Pool({
         connectionString,
         ssl: isRemote
           ? {
-            rejectUnauthorized,
-            ca: process.env.DATABASE_CA_CERT,
+            rejectUnauthorized: false,
           }
           : undefined,
         allowExitOnIdle: true,
@@ -307,23 +251,6 @@ export class DatabaseClient {
     return formatRow(res.rows[0]);
   }
 
-  // Insert a new entry.
-  async createEntry(input: CreateSiteEntryRequest): Promise<SiteEntry> {
-    const pool = this.getPool();
-    const websiteName = input.website_name || input.product_name || '';
-    const description = input.website_short_description || input.additional_notes || '';
-    const llmsTxt = input.llms_txt_storage || input.llms_txt_url || input.llm_txt || null;
-    const llmsFullTxt = input.llms_full_txt_storage || input.llms_full_txt_url || null;
-    const result = await pool.query<SiteEntry>(INSERT_ENTRY_SQL, [
-      websiteName,
-      input.website_url,
-      description,
-      llmsTxt,
-      llmsFullTxt,
-    ]);
-    return formatRow(result.rows[0]);
-  }
-
   // Update fields on an existing entry.
   async updateEntry(id: string, patch: Partial<SiteEntry>): Promise<SiteEntry | null> {
     const pool = this.getPool();
@@ -351,13 +278,6 @@ export class DatabaseClient {
       return null;
     }
     return formatRow(result.rows[0]);
-  }
-
-  // Get entries that need updating.
-  async findStaleEntries(): Promise<SiteEntry[]> {
-    const pool = this.getPool();
-    const result = await pool.query<SiteEntry>(SELECT_STALE_ENTRIES_SQL);
-    return result.rows.map(formatRow);
   }
 
   // Get cadence row for a site.
@@ -514,29 +434,11 @@ export class DatabaseClient {
     return res.rows.map(formatJobRow);
   }
 
-  // Retrieve background jobs with optional status filter.
-  async getBackgroundJobs(status?: JobStatus): Promise<BackgroundJob[]> {
-    const pool = this.getPool();
-    if (status) {
-      const res = await pool.query<BackgroundJob>(SELECT_BACKGROUND_JOBS_BY_STATUS_SQL, [status]);
-      return res.rows.map(formatJobRow);
-    }
-    const res = await pool.query<BackgroundJob>(SELECT_ALL_BACKGROUND_JOBS_SQL);
-    return res.rows.map(formatJobRow);
-  }
-
   // Bounce the queue: resets active/processing jobs and clears dead letter jobs.
   async bounceJobQueue(): Promise<void> {
     const pool = this.getPool();
     await pool.query(RESET_PROCESSING_JOBS_SQL);
     await pool.query(DELETE_DEAD_LETTER_JOBS_SQL);
-  }
-
-  // Move dead letter jobs back into the active queue for reprocessing.
-  async reprocessDeadLetterJobs(): Promise<number> {
-    const pool = this.getPool();
-    const res = await pool.query(REPROCESS_DEAD_LETTER_JOBS_SQL);
-    return res.rowCount || 0;
   }
 }
 

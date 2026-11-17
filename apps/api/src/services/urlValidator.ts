@@ -82,10 +82,8 @@ export async function validatePublicUrl(
     checkHost = checkHost.slice(1, -1);
   }
 
-  // When explicitly enabled via options, environment flag, or in development mode, permit localhost / internal URLs
-  const allowLocal =
-    options?.allowLocal ??
-    (process.env.ALLOW_LOCAL_URLS === 'true' || process.env.NODE_ENV === 'development');
+  // When explicitly enabled via options or in development mode, permit localhost / internal URLs
+  const allowLocal = options?.allowLocal ?? (process.env.NODE_ENV === 'development');
 
   if (allowLocal) {
     return { valid: true };

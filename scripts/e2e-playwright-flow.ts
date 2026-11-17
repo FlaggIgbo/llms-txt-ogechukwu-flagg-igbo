@@ -13,7 +13,7 @@ const isRemote = Boolean(TARGET_URL);
 if (!isRemote) {
   process.env.DATABASE_URL =
     process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/llmstxt_directory';
-  process.env.STORAGE_PROVIDER = process.env.STORAGE_PROVIDER || 'r2';
+  process.env.STORAGE_PROVIDER = process.env.STORAGE_PROVIDER || 'minio';
   process.env.PORT = '4000';
 }
 
@@ -46,17 +46,6 @@ async function main() {
   let viteServer: ViteDevServer | null = null;
 
   if (!isRemote) {
-    // Clean any previous test rows for docs.python.org or docs.stripe.com
-    const { db } = await import('../packages/database/index.js');
-    try {
-      const existingPython = await db.getEntryByUrl('https://docs.python.org');
-      if (existingPython) await db.deleteEntry(existingPython.id);
-      const existingStripe = await db.getEntryByUrl('https://docs.stripe.com');
-      if (existingStripe) await db.deleteEntry(existingStripe.id);
-    } catch {
-      // Ignore cleanup error
-    }
-
     // 1. Start Background Worker Consumer & API Server
     console.log('📡 Step 1: Registering Local Worker Consumer and loading API Gateway...');
     const { startGenerateConsumer } = await import(

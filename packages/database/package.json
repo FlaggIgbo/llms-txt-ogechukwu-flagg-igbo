@@ -8,10 +8,9 @@
     "lint": "tsc --noEmit",
     "test": "tsx --test",
     "build": "tsc --noEmit",
-    "db:migrate": "npx tsx migrate.ts"
+    "db:migrate": "node --env-file-if-exists=../../.env --import tsx migrate.ts"
   },
   "dependencies": {
-    "@llmstxt/logger": "*",
     "@llmstxt/shared-types": "*",
     "@types/pg": "^8.23.1",
     "pg": "^8.23.1"

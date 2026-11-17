@@ -52,14 +52,6 @@ describe('SSRF Protection (validatePublicUrl)', () => {
   it('permits localhost and internal URLs when allowLocal is explicitly enabled', async () => {
     assert.equal((await validatePublicUrl('http://localhost:3000', { allowLocal: true })).valid, true);
     assert.equal((await validatePublicUrl('http://127.0.0.1:8080/docs', { allowLocal: true })).valid, true);
-
-    process.env.ALLOW_LOCAL_URLS = 'true';
-    try {
-      assert.equal((await validatePublicUrl('http://localhost:4000')).valid, true);
-      assert.equal((await validatePublicUrl('http://127.0.0.1:5173')).valid, true);
-    } finally {
-      delete process.env.ALLOW_LOCAL_URLS;
-    }
   });
 });
 
@@ -126,5 +118,72 @@ describe('Search Service & Pagination', () => {
     const result = await searchService.searchEntries({ q: 'FastAPI', limit: 10, offset: 0 });
     assert.ok(Array.isArray(result.entries));
     assert.ok(typeof result.total === 'number');
+  });
+});
+
+describe('Sentry API Error Interception', () => {
+  it('captures API endpoint errors in Sentry with request context', async () => {
+    const { getSentryClient, logError } = await import('@llmstxt/logger');
+    const sentry = await getSentryClient();
+    let capturedEvent: any = null;
+
+    sentry.init({
+      dsn: 'https://1234567890abcdef1234567890abcdef@o123456.ingest.sentry.io/123456',
+      beforeSend(event: any) {
+        capturedEvent = event;
+        return null;
+      },
+    });
+
+    logError(new Error('Internal database failure on /entries'), {
+      endpoint: 'GET /entries',
+      url: '/entries?status=Pending',
+      method: 'GET',
+    });
+
+    await sentry.flush(500);
+
+    assert.ok(capturedEvent !== null, 'Sentry should capture the API error');
+    assert.equal(capturedEvent.exception?.values?.[0]?.value, 'Internal database failure on /entries');
+    assert.equal(capturedEvent.extra?.endpoint, 'GET /entries');
+    assert.equal(capturedEvent.extra?.url, '/entries?status=Pending');
+  });
+
+  it('captures real handlePostEntry errors (e.g. malformed JSON) in Sentry', async () => {
+    const { Readable } = await import('node:stream');
+    const { getSentryClient } = await import('@llmstxt/logger');
+    const { handlePostEntry } = await import('./routes/entries.js');
+    const sentry = await getSentryClient();
+    let capturedEvent: any = null;
+
+    sentry.init({
+      dsn: 'https://1234567890abcdef1234567890abcdef@o123456.ingest.sentry.io/123456',
+      beforeSend(event: any) {
+        capturedEvent = event;
+        return null;
+      },
+    });
+
+    const req = Object.assign(Readable.from(['{invalid_json']), {
+      method: 'POST',
+      url: '/entries',
+      headers: { 'x-forwarded-for': '198.51.100.123' },
+      socket: { remoteAddress: '198.51.100.123' },
+    }) as any;
+
+    let responseStatus = 0;
+    const res = {
+      writeHead(status: number) {
+        responseStatus = status;
+      },
+      end() {},
+    } as any;
+
+    await handlePostEntry(req, res);
+    await sentry.flush(500);
+
+    assert.equal(responseStatus, 500);
+    assert.ok(capturedEvent !== null, 'Sentry should capture the route error');
+    assert.equal(capturedEvent.extra?.endpoint, 'POST /entries');
   });
 });

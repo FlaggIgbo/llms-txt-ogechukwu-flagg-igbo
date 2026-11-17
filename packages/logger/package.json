@@ -5,6 +5,7 @@
   "types": "./index.ts",
   "type": "module",
   "scripts": {
+    "test": "tsx --test index.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "build": "tsc --noEmit"

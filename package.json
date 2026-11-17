@@ -16,13 +16,13 @@
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "test:e2e": "tsx scripts/e2e-playwright-flow.ts",
+    "test:e2e": "node --env-file-if-exists=.env --import tsx scripts/e2e-playwright-flow.ts",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down",
     "infra:sync-r2": "./scripts/sync-r2-to-minio.sh",
     "db:migrate": "npm run db:migrate --workspace=@llmstxt/database",
-    "screenshots": "tsx scripts/generate-screenshots.ts",
+    "screenshots": "node --env-file-if-exists=.env --import tsx scripts/generate-screenshots.ts",
     "screenshots:check": "./scripts/pre-push-screenshots.sh"
   },
   "devDependencies": {
@@ -31,6 +31,6 @@
     "typescript": "^5.6.3"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   }
 }

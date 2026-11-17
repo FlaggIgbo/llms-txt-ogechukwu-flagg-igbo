@@ -22,7 +22,6 @@ export async function checkStaleSites(batchSize: number = 50): Promise<UpdateLog
       checked_at: new Date().toISOString(),
       was_stale: true,
       regenerated: false,
-      r2_log_key: `logs/${site.site_id}/${Date.now()}.json`,
     });
   }
 

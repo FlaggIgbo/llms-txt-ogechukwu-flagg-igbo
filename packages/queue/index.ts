@@ -1,14 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import type { GenerateJobPayload, BackgroundJob } from '@llmstxt/shared-types';
+import type { GenerateJobPayload } from '@llmstxt/shared-types';
 import { logError, logWarn } from '@llmstxt/logger';
 import { db } from '@llmstxt/database';
-
-// Redis/Database queue settings.
-export interface QueueConfig {
-  redisHost: string;
-  redisPort: number;
-  queueName: string;
-}
 
 // Function type for processing a job.
 export type JobHandler = (payload: GenerateJobPayload) => Promise<void>;
@@ -262,35 +255,12 @@ export class GenerationQueue {
     return [...this.deadLetterQueue];
   }
 
-  // Fetch all dead letter jobs directly from the PostgreSQL background_jobs table.
-  async getDeadLetterJobsFromDb(): Promise<BackgroundJob[]> {
-    return db.getDeadLetterJobs();
-  }
-
-  // Clear the Dead Letter Queue.
-  clearDeadLetterQueue(): void {
-    this.deadLetterQueue = [];
-  }
-
   // Bounce/reset the queue: resets active jobs and clears dead letter items in memory and DB.
   async bounceQueue(): Promise<void> {
     this.activeJobs.clear();
     this.deadLetterQueue = [];
     await db.bounceJobQueue().catch(() => {});
     logWarn('[GenerationQueue] Queue has been bounced by operator.');
-  }
-
-  // Reprocess all dead letter jobs back into the active queue.
-  async reprocessDeadLetterJobs(): Promise<number> {
-    await db.reprocessDeadLetterJobs().catch(() => {});
-    const jobsToRetry = [...this.deadLetterQueue];
-    this.deadLetterQueue = [];
-
-    for (const dlqJob of jobsToRetry) {
-      await this.enqueueGenerateJob(dlqJob.payload);
-    }
-
-    return jobsToRetry.length;
   }
 
   // Get count of currently active in-flight jobs.

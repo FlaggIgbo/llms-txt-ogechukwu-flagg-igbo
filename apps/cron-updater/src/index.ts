@@ -1,5 +1,7 @@
-import { logInfo, logError } from '@llmstxt/logger';
+import { initSentry, logInfo, logError } from '@llmstxt/logger';
 import { checkStaleSites } from './jobs/checkStaleSites.js';
+
+initSentry();
 
 // Start the scheduled updater service.
 export async function startCronUpdater(): Promise<void> {

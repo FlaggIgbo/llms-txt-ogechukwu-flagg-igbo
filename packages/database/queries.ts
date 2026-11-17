@@ -182,39 +182,11 @@ export const SELECT_ENTRY_BY_URL_SQL = `
 `;
 
 /**
- * Inserts a new directory entry and returns the inserted row.
- * Params: $1: name, $2: url, $3: description, $4: llms_txt_storage, $5: llms_full_txt_storage
- */
-export const INSERT_ENTRY_SQL = `
-  INSERT INTO site_entries (website_name, website_url, website_short_description, llms_txt_storage, llms_full_txt_storage)
-  VALUES ($1, $2, $3, $4, $5)
-  RETURNING *
-`;
-
-/**
  * Builds dynamic parameterized UPDATE query for partial entry updates.
  */
 export function buildUpdateEntrySql(sets: string[], idParamIndex: number): string {
   return `UPDATE site_entries SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${idParamIndex} RETURNING *`;
 }
-
-/**
- * Finds all entries where is_updated_latest is false (pending cadence refresh).
- */
-export const SELECT_STALE_ENTRIES_SQL = 'SELECT * FROM site_entries WHERE is_updated_latest = false';
-
-/**
- * Records a user submission that failed validation or conflict checks with FAILED status and error tags.
- * Params: $1: name, $2: url, $3: description, $4: llms_txt, $5: llms_full_txt, $6: error_msg, $7: error_code
- */
-export const INSERT_DUPLICATE_FAILED_ENTRY_SQL = `
-  INSERT INTO site_entries (
-    website_name, website_url, website_short_description,
-    llms_txt_storage, llms_full_txt_storage, status, is_updated_latest,
-    error_message, error_code, is_scheduled_update
-  ) VALUES ($1, $2, $3, $4, $5, 'FAILED', FALSE, $6, $7, FALSE)
-  RETURNING *
-`;
 
 /**
  * Inserts a newly submitted entry in PENDING status as part of the initial submission transaction.
@@ -371,18 +343,6 @@ export const SELECT_DEAD_LETTER_JOBS_SQL =
   "SELECT * FROM background_jobs WHERE status = 'DEAD_LETTER' ORDER BY failed_at DESC";
 
 /**
- * Selects background jobs filtered by status.
- * Params: $1: status
- */
-export const SELECT_BACKGROUND_JOBS_BY_STATUS_SQL =
-  'SELECT * FROM background_jobs WHERE status = $1 ORDER BY created_at DESC';
-
-/**
- * Selects all background jobs ordered by creation time.
- */
-export const SELECT_ALL_BACKGROUND_JOBS_SQL = 'SELECT * FROM background_jobs ORDER BY created_at DESC';
-
-/**
  * Resets any active/processing jobs back to QUEUED when bouncing the queue.
  */
 export const RESET_PROCESSING_JOBS_SQL =
@@ -392,9 +352,3 @@ export const RESET_PROCESSING_JOBS_SQL =
  * Purges all dead letter queue jobs permanently.
  */
 export const DELETE_DEAD_LETTER_JOBS_SQL = "DELETE FROM background_jobs WHERE status = 'DEAD_LETTER'";
-
-/**
- * Re-enqueues all dead letter queue jobs for reprocessing, clearing errors and resetting attempt counters.
- */
-export const REPROCESS_DEAD_LETTER_JOBS_SQL =
-  "UPDATE background_jobs SET status = 'QUEUED', attempts = 0, last_error = null, failed_at = null, updated_at = NOW() WHERE status = 'DEAD_LETTER' RETURNING id";

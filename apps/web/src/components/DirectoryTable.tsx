@@ -27,18 +27,6 @@ export function resolveLlmTxtUrl(entry: SiteEntry): string {
     return storageUrl;
   }
 
-  // Handle Cloudflare R2 paths.
-  if (storageUrl.startsWith('r2://')) {
-    const publicBase = (import.meta as any).env?.VITE_R2_PUBLIC_URL || '';
-    if (publicBase) {
-      const pathWithoutPrefix = storageUrl.slice(5);
-      const parts = pathWithoutPrefix.split('/');
-      const key = parts.slice(1).join('/');
-      const cleanBase = publicBase.endsWith('/') ? publicBase.slice(0, -1) : publicBase;
-      return `${cleanBase}/${key}`;
-    }
-  }
-
   // Fallback to website URL with /llms.txt.
   if (entry.website_url) {
     return `${trimTrailingSlashes(entry.website_url)}/llms.txt`;
