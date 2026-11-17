@@ -105,11 +105,15 @@ export async function handleGenerateJob(payload: GenerateJobPayload): Promise<vo
 
     // Update cadence table with new interval and content hash.
     const cadence = await db.getCadenceBySiteId(entryId);
-    const currentInterval = cadence?.check_interval_hours || getInitialIntervalForCategory(files.siteCategory);
+    const isFirstCrawl = !cadence?.last_checked_at;
+    const initialBaseInterval = isFirstCrawl
+      ? getInitialIntervalForCategory(files.siteCategory)
+      : (cadence?.check_interval_hours || getInitialIntervalForCategory(files.siteCategory));
 
     const next = computeNextCadence({
-      changed: true,
-      currentIntervalHours: currentInterval,
+      isInitial: isFirstCrawl,
+      changed: isFirstCrawl ? false : true, // Initial crawl establishes baseline, not a delta
+      currentIntervalHours: initialBaseInterval,
       unchangedStreak: cadence?.unchanged_streak || 0,
     });
 

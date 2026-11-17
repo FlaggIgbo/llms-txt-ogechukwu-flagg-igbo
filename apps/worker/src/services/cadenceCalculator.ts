@@ -3,6 +3,7 @@ export interface CadenceCalculationInput {
   changed: boolean;
   currentIntervalHours: number;
   unchangedStreak: number;
+  isInitial?: boolean;
 }
 
 // Result of the cadence calculation.
@@ -16,6 +17,16 @@ export interface CadenceCalculationOutput {
 export function computeNextCadence(input: CadenceCalculationInput): CadenceCalculationOutput {
   const FLOOR_HOURS = 6;
   const CEILING_HOURS = 24 * 30; // 30 days
+
+  // If this is the initial crawl, initialize interval from category baseline without backoff
+  if (input.isInitial) {
+    const nextCheckAt = new Date(Date.now() + input.currentIntervalHours * 3600 * 1000);
+    return {
+      newIntervalHours: input.currentIntervalHours,
+      newStreak: 0,
+      nextCheckAt,
+    };
+  }
 
   // If content changed, halve interval and reset streak.
   if (input.changed) {

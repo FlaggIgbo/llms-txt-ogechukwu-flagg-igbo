@@ -186,3 +186,35 @@ test('computeNextCadence: handles adaptive backoff correctly', () => {
   assert.equal(ceilingResult.newIntervalHours, 720);
   assert.equal(ceilingResult.newStreak, 11);
 });
+
+test('computeNextCadence: initializes category baseline without backoff on initial crawl', () => {
+  // api_docs site starts at 168h
+  const apiResult = computeNextCadence({
+    isInitial: true,
+    changed: false,
+    currentIntervalHours: 168,
+    unchangedStreak: 0,
+  });
+  assert.equal(apiResult.newIntervalHours, 168);
+  assert.equal(apiResult.newStreak, 0);
+
+  // marketing site starts at 72h
+  const marketingResult = computeNextCadence({
+    isInitial: true,
+    changed: false,
+    currentIntervalHours: 72,
+    unchangedStreak: 0,
+  });
+  assert.equal(marketingResult.newIntervalHours, 72);
+  assert.equal(marketingResult.newStreak, 0);
+
+  // blog site starts at 12h
+  const blogResult = computeNextCadence({
+    isInitial: true,
+    changed: false,
+    currentIntervalHours: 12,
+    unchangedStreak: 0,
+  });
+  assert.equal(blogResult.newIntervalHours, 12);
+  assert.equal(blogResult.newStreak, 0);
+});
