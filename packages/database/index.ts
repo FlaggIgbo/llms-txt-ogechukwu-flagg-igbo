@@ -215,9 +215,15 @@ export class DatabaseClient {
   private getPool(): pg.Pool {
     if (!this.pool) {
       const isRemote = !connectionString.includes('localhost') && !connectionString.includes('127.0.0.1');
+      const rejectUnauthorized = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false';
       this.pool = new pg.Pool({
         connectionString,
-        ssl: isRemote ? { rejectUnauthorized: false } : undefined,
+        ssl: isRemote
+          ? {
+              rejectUnauthorized,
+              ca: process.env.DATABASE_CA_CERT,
+            }
+          : undefined,
         allowExitOnIdle: true,
       });
     }

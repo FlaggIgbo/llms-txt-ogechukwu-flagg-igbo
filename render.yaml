@@ -17,6 +17,8 @@ services:
           type: web
           name: llmstxt-api
           property: host
+      - key: VITE_SENTRY_DSN
+        sync: false
     routes:
       - type: rewrite
         source: /*
@@ -50,6 +52,8 @@ services:
         sync: false
       - key: R2_PUBLIC_URL
         sync: false
+      - key: SENTRY_DSN
+        sync: false
 
   # 3. Scraping, LLMs.txt Generation & Cadence Worker (Docker container with pre-installed Chromium)
   - type: worker
@@ -80,4 +84,21 @@ services:
       - key: R2_SECRET_ACCESS_KEY
         sync: false
       - key: R2_PUBLIC_URL
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+
+  # 4. Scheduled Cadence Updater Service
+  - type: worker
+    name: llmstxt-cron-updater
+    env: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npx tsx apps/cron-updater/src/index.ts
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: llmstxt-postgres
+          property: connectionString
+      - key: SENTRY_DSN
         sync: false

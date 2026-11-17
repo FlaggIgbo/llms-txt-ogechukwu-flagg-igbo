@@ -5,6 +5,8 @@
   "types": "./index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "tsx --test",
     "build": "tsc --noEmit",
     "db:migrate": "npx tsx migrate.ts"
   },

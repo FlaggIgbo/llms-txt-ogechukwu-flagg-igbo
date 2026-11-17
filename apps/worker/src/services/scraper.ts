@@ -3,6 +3,7 @@ import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import { NodeHtmlMarkdown } from 'node-html-markdown';
 import { logWarn } from '@llmstxt/logger';
+import { validatePublicUrl } from './urlValidator.js';
 
 // An extracted link from a page.
 export interface ScrapedLink {
@@ -390,6 +391,12 @@ async function scrapeWebsiteWithFetch(
 // Fetch and parse a website into structured page data.
 export async function scrapeWebsite(rawWebsiteUrl: string): Promise<ScrapedPage> {
   const websiteUrl = normalizeUrl(rawWebsiteUrl);
+
+  // SSRF guard: ensure URL is public and does not point to internal resources or metadata
+  const check = await validatePublicUrl(websiteUrl);
+  if (!check.valid) {
+    throw new Error(`SSRF blocked: ${check.error}`);
+  }
 
   // Check if site already has an official llms.txt.
   const officialFiles = await checkExistingLlmsTxt(websiteUrl);

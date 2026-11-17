@@ -1,6 +1,4 @@
-const SENTRY_DSN =
-  process.env.SENTRY_DSN ||
-  'https://7daee2a1d48df207d91c86b0fee15cf3@o4512439839096833.ingest.us.sentry.io/4512439858888704';
+const SENTRY_DSN = process.env.SENTRY_DSN;
 
 // Check if running in local development or test mode.
 function checkIsDev(): boolean {

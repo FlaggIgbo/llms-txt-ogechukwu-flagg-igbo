@@ -1,5 +1,4 @@
 import http from 'node:http';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { db } from '@llmstxt/database';
 import { ApiErrorCode, ApiErrorMessage } from '@llmstxt/shared-types';
@@ -19,7 +18,7 @@ export function startApiServer(port: number = PORT): void {
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-    // Handle preflight requests.
+    // Handle the permission check for a  browser.
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
@@ -41,11 +40,23 @@ export function startApiServer(port: number = PORT): void {
       return handleSearch(req, res);
     }
 
-    // Serve stored .txt files from MinIO/S3 cluster, local disk, or PostgreSQL storage_files fallback.
+    // Serve stored .txt files from Cloudflare R2 / S3 or PostgreSQL storage_files fallback.
     if (pathname.startsWith('/storage/') && req.method === 'GET') {
       const relPath = pathname.slice('/storage/'.length);
 
-      // If MinIO / S3 cluster is configured, redirect directly to S3 / MinIO
+      // Block paths with directory traversal or absolute paths.
+      if (relPath.includes('..') || path.isAbsolute(relPath)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: ApiErrorMessage.FORBIDDEN,
+            code: ApiErrorCode.FORBIDDEN,
+          })
+        );
+        return;
+      }
+
+      // If Cloudflare R2 / MinIO / S3 is configured, redirect directly to S3 / R2
       const s3Base = process.env.S3_PUBLIC_URL || process.env.R2_PUBLIC_URL || process.env.S3_ENDPOINT;
       const s3Bucket = process.env.R2_LLMS_TXT_BUCKET || process.env.S3_BUCKET || 'llmstxt-files-bucket';
       if (s3Base) {
@@ -61,62 +72,37 @@ export function startApiServer(port: number = PORT): void {
         return;
       }
 
-      const storageDir = path.resolve(process.env.LOCAL_STORAGE_DIR || './data/storage');
-      const safePath = path.normalize(path.join(storageDir, relPath));
+      // Retrieve file contents directly from PostgreSQL storage_files.
+      try {
+        const dbContent = await db.getStorageFile(relPath);
+        if (dbContent !== null) {
+          res.writeHead(200, {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Access-Control-Allow-Origin': '*',
+          });
+          res.end(dbContent);
+          return;
+        }
 
-      // Block paths outside the storage folder.
-      if (!safePath.startsWith(storageDir)) {
-        res.writeHead(403, { 'Content-Type': 'application/json' });
+        // File truly does not exist
+        res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(
           JSON.stringify({
-            error: ApiErrorMessage.FORBIDDEN,
-            code: ApiErrorCode.FORBIDDEN,
+            error: ApiErrorMessage.NOT_FOUND,
+            code: ApiErrorCode.NOT_FOUND,
           })
         );
         return;
-      }
-
-      // Send file contents from local disk first, falling back to PostgreSQL storage_files.
-      try {
-        const content = await fs.readFile(safePath, 'utf-8');
-        res.writeHead(200, {
-          'Content-Type': 'text/plain; charset=utf-8',
-          'Access-Control-Allow-Origin': '*',
-        });
-        res.end(content);
-        return;
       } catch {
-        try {
-          const dbContent = await db.getStorageFile(relPath);
-          if (dbContent !== null) {
-            res.writeHead(200, {
-              'Content-Type': 'text/plain; charset=utf-8',
-              'Access-Control-Allow-Origin': '*',
-            });
-            res.end(dbContent);
-            return;
-          }
-
-          // File truly does not exist
-          res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              error: ApiErrorMessage.NOT_FOUND,
-              code: ApiErrorCode.NOT_FOUND,
-            })
-          );
-          return;
-        } catch {
-          // Database failure occurred while fetching storage file
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              error: ApiErrorMessage.INTERNAL_ERROR,
-              code: ApiErrorCode.DATABASE_ERROR,
-            })
-          );
-          return;
-        }
+        // Database failure occurred while fetching storage file
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: ApiErrorMessage.INTERNAL_ERROR,
+            code: ApiErrorCode.DATABASE_ERROR,
+          })
+        );
+        return;
       }
     }
 
@@ -135,7 +121,7 @@ export function startApiServer(port: number = PORT): void {
           m.startWorker();
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   });
 }
 

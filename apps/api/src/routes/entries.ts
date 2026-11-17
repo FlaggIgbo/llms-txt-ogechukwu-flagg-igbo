@@ -23,6 +23,7 @@ import {
   recordIpSubmission,
   DAILY_ENTRY_LIMIT,
 } from '../services/rateLimiter.js';
+import { validatePublicUrl } from '../services/urlValidator.js';
 
 // Send a strongly-typed JSON payload over a TypedApiResponse.
 export function sendJsonResponse<T>(
@@ -157,6 +158,16 @@ export async function handlePostEntry(
     if (!body.website_url) {
       sendJsonResponse(res, 400, {
         error: ApiErrorMessage.WEBSITE_URL_REQUIRED,
+        code: ApiErrorCode.BAD_REQUEST,
+      });
+      return;
+    }
+
+    // SSRF and protocol check
+    const urlCheck = await validatePublicUrl(body.website_url);
+    if (!urlCheck.valid) {
+      sendJsonResponse(res, 400, {
+        error: urlCheck.error || 'Invalid website URL',
         code: ApiErrorCode.BAD_REQUEST,
       });
       return;

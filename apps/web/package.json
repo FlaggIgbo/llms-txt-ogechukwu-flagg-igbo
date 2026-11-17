@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "tsx --test",
     "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
     "screenshots": "tsx ../../scripts/generate-screenshots.ts"
   },
   "dependencies": {

@@ -12,17 +12,34 @@ interface RateLimitRecord {
 // In-memory store for tracking IP submissions.
 const ipSubmissionMap = new Map<string, RateLimitRecord>();
 
-// Extract the client's IP address from incoming request headers or socket.
+// Extract the client's IP address securely from reverse proxy headers or socket, preventing spoofing.
 export function getClientIp<TBody = unknown, TQuery = Record<string, string | undefined>>(
   req: TypedApiRequest<TBody, TQuery>
 ): string {
+  // Cloudflare edge sets CF-Connecting-IP directly
+  const cfIp = req.headers['cf-connecting-ip'];
+  if (typeof cfIp === 'string' && cfIp.length > 0) {
+    return cfIp.trim();
+  }
+
+  // Render reverse proxy sets Render-Client-IP directly
+  const renderIp = req.headers['render-client-ip'];
+  if (typeof renderIp === 'string' && renderIp.length > 0) {
+    return renderIp.trim();
+  }
+
+  // If behind multi-hop proxies, take the rightmost IP (closest to our trusted proxy)
   const forwarded = req.headers['x-forwarded-for'];
   if (typeof forwarded === 'string' && forwarded.length > 0) {
-    return forwarded.split(',')[0].trim();
+    const parts = forwarded.split(',').map((s) => s.trim()).filter(Boolean);
+    if (parts.length > 0) {
+      return parts[parts.length - 1];
+    }
   }
   if (Array.isArray(forwarded) && forwarded.length > 0) {
-    return forwarded[0].trim();
+    return forwarded[forwarded.length - 1].trim();
   }
+
   return req.socket.remoteAddress || '127.0.0.1';
 }
 
