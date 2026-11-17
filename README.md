@@ -43,45 +43,9 @@ npm run test:e2e
 
 Automated visual snapshots are captured for all components and pages using Playwright, tracked in Git to leverage **GitHub's native visual image diffing** (2-up, Swipe, Onion Skin, and Difference views).
 
-### Full Pages
-
-| Page | Desktop Preview (1280x800) | Mobile Preview (390x844) |
-|---|---|---|
-| **Directory (Home)** | ![Home Page](screenshots/pages/home-page.png) | ![Home Mobile](screenshots/pages/home-page-mobile.png) |
-| **Add Entry Form** | ![Add Entry Page](screenshots/pages/add-entry-page.png) | ![Add Entry Mobile](screenshots/pages/add-entry-page-mobile.png) |
-| **Background Updates** | ![Updates Page](screenshots/pages/updates-page.png) | ![Updates Mobile](screenshots/pages/updates-page-mobile.png) |
-| **Search Filtered** | ![Home Filtered](screenshots/pages/home-page-filtered.png) | — |
-| **Updates (Empty)** | ![Updates Empty](screenshots/pages/updates-page-empty.png) | — |
-
-<details>
-<summary><strong>🔍 Click to View Component Screenshots</strong></summary>
-
-### Components
-
-#### Navigation Tabs
-![Navigation Tabs](screenshots/components/navigation-tabs.png)
-
-#### Search Bar
-| Default State | Active / Filled State |
-|---|---|
-| ![Search Bar Empty](screenshots/components/search-bar-empty.png) | ![Search Bar Filled](screenshots/components/search-bar-filled.png) |
-
-#### Directory Cards
-| Standard Card (Full Meta) | Minimal Card |
-|---|---|
-| ![Directory Card Standard](screenshots/components/directory-card-standard.png) | ![Directory Card Minimal](screenshots/components/directory-card-minimal.png) |
-
-#### Directory Table
-| Populated Table | Loading State | Empty / No Results |
-|---|---|---|
-| ![Table Populated](screenshots/components/directory-table-populated.png) | ![Table Loading](screenshots/components/directory-table-loading.png) | ![Table Empty](screenshots/components/directory-table-empty.png) |
-
-#### Submission Form
-| Empty Initial Form | Validation Error Feedback | Completed / Filled Form |
-|---|---|---|
-| ![Form Empty](screenshots/components/submission-form-empty.png) | ![Form Validation](screenshots/components/submission-form-validation.png) | ![Form Filled](screenshots/components/submission-form-filled.png) |
-
-</details>
+* **All Screenshots:** [`screenshots/`](screenshots/)
+* **Full Page Snapshots (Desktop & Mobile):** [`screenshots/pages/`](screenshots/pages/)
+* **Component Snapshots:** [`screenshots/components/`](screenshots/components/)
 
 ---
 
