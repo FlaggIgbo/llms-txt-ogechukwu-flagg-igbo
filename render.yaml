@@ -36,6 +36,8 @@ services:
         fromDatabase:
           name: llmstxt-postgres
           property: connectionString
+      - key: DATABASE_SSL_REJECT_UNAUTHORIZED
+        value: "false"
       - key: STORAGE_PROVIDER
         value: r2
       - key: LOCAL_STORAGE_DIR
@@ -67,6 +69,8 @@ services:
         fromDatabase:
           name: llmstxt-postgres
           property: connectionString
+      - key: DATABASE_SSL_REJECT_UNAUTHORIZED
+        value: "false"
       - key: GEMINI_API_KEY
         sync: false
       - key: STORAGE_PROVIDER
@@ -100,5 +104,7 @@ services:
         fromDatabase:
           name: llmstxt-postgres
           property: connectionString
+      - key: DATABASE_SSL_REJECT_UNAUTHORIZED
+        value: "false"
       - key: SENTRY_DSN
         sync: false

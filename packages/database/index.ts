@@ -191,7 +191,7 @@ export class DatabaseClient {
     if (!this.pool) {
       // Local Docker PostgreSQL has no SSL by default
       const isRemote = !connectionString.includes('localhost') && !connectionString.includes('127.0.0.1');
-      const rejectUnauthorized = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false';
+      const rejectUnauthorized = Boolean(process.env.DATABASE_CA_CERT && process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false');
       this.pool = new pg.Pool({
         connectionString,
         ssl: isRemote
@@ -209,27 +209,31 @@ export class DatabaseClient {
   // Insert seed rows and ensure schema tables if not already done.
   async ensureDevelopmentSeed(): Promise<void> {
     if (this.hasEnsuredSeed) return;
-    const pool = this.getPool();
-    await pool.query(ENSURE_SCHEMA_SQL).catch(() => { });
-
-    for (const entry of MOCK_SEED_ENTRIES) {
-      await pool.query(UPSERT_SEED_ENTRY_SQL, [
-        entry.id,
-        entry.website_name,
-        entry.website_url,
-        entry.website_short_description,
-        entry.is_updated_latest,
-        entry.llms_txt_storage,
-        entry.llms_full_txt_storage,
-        entry.status,
-        entry.created_at,
-        entry.updated_at,
-      ]);
-    }
-
-    // Recover any entries or jobs stuck in PROCESSING from a previous restart.
-    await pool.query(RECOVER_STUCK_PROCESSING_SQL).catch(() => { });
     this.hasEnsuredSeed = true;
+    try {
+      const pool = this.getPool();
+      await pool.query(ENSURE_SCHEMA_SQL).catch(() => { });
+
+      for (const entry of MOCK_SEED_ENTRIES) {
+        await pool.query(UPSERT_SEED_ENTRY_SQL, [
+          entry.id,
+          entry.website_name,
+          entry.website_url,
+          entry.website_short_description,
+          entry.is_updated_latest,
+          entry.llms_txt_storage,
+          entry.llms_full_txt_storage,
+          entry.status,
+          entry.created_at,
+          entry.updated_at,
+        ]).catch(() => { });
+      }
+
+      // Recover any entries or jobs stuck in PROCESSING from a previous restart.
+      await pool.query(RECOVER_STUCK_PROCESSING_SQL).catch(() => { });
+    } catch {
+      // Seed failure should never take down production database operations.
+    }
   }
 
   // Get all entries sorted by newest update.
