@@ -1,6 +1,6 @@
 import React from 'react';
 import type { SiteEntry } from '@llmstxt/shared-types';
-import { resolveLlmTxtUrl } from './DirectoryTable.js';
+import { resolveLlmTxtUrl, formatDateTime } from './DirectoryTable.js';
 
 // Props for a single site card.
 export interface DirectoryCardProps {
@@ -62,7 +62,7 @@ export function DirectoryCard({ entry }: DirectoryCardProps): React.ReactElement
         )}
         {entry.updated_at && (
           <span className="card-updated">
-            Updated: {new Date(entry.updated_at).toLocaleDateString()}
+            Updated: {formatDateTime(entry.updated_at)}
           </span>
         )}
       </footer>

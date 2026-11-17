@@ -172,6 +172,8 @@ export async function generateScreenshots(): Promise<string[]> {
     const componentPage = await browser.newPage({
       viewport: { width: 1280, height: 1600 },
       deviceScaleFactor: 2, // HiDPI for crisp GitHub image diffs
+      timezoneId: 'America/New_York',
+      locale: 'en-US',
     });
 
     await componentPage.goto(`${baseUrl}/harness.html`, { waitUntil: 'networkidle' });
@@ -209,6 +211,8 @@ export async function generateScreenshots(): Promise<string[]> {
     const desktopPage = await browser.newPage({
       viewport: { width: 1280, height: 800 },
       deviceScaleFactor: 2,
+      timezoneId: 'America/New_York',
+      locale: 'en-US',
     });
     await setupApiMockRoutes(desktopPage, MOCK_UPDATING_ENTRIES);
 
@@ -260,6 +264,8 @@ export async function generateScreenshots(): Promise<string[]> {
     const emptyUpdatesPage = await browser.newPage({
       viewport: { width: 1280, height: 800 },
       deviceScaleFactor: 2,
+      timezoneId: 'America/New_York',
+      locale: 'en-US',
     });
     await setupApiMockRoutes(emptyUpdatesPage, []);
     await emptyUpdatesPage.goto(`${baseUrl}/#updates`, { waitUntil: 'networkidle' });
@@ -280,6 +286,8 @@ export async function generateScreenshots(): Promise<string[]> {
     const mobilePage = await browser.newPage({
       viewport: { width: 390, height: 844 },
       deviceScaleFactor: 2,
+      timezoneId: 'America/New_York',
+      locale: 'en-US',
     });
     await setupApiMockRoutes(mobilePage, MOCK_UPDATING_ENTRIES);
 

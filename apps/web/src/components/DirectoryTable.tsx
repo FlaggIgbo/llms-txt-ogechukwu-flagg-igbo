@@ -48,16 +48,18 @@ export function resolveLlmTxtUrl(entry: SiteEntry): string {
   return '';
 }
 
-// Format an ISO date string into a readable date.
-function formatDate(isoString: string): string {
+// Format an ISO date string into a readable date and timestamp localized to the device's timezone.
+export function formatDateTime(isoString?: string | null): string {
   if (!isoString) return '—';
   try {
     const date = new Date(isoString);
     if (isNaN(date.getTime())) return isoString;
-    return date.toLocaleDateString('en-US', {
+    return date.toLocaleString(undefined, {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
     });
   } catch {
     return isoString;
@@ -119,9 +121,9 @@ function renderEntryRow(entry: SiteEntry) {
         )}
       </td>
 
-      {/* Last updated date */}
+      {/* Last updated date and timestamp localized to device timezone */}
       <td className="cell-updated">
-        {formatDate(entry.updated_at)}
+        {formatDateTime(entry.updated_at)}
       </td>
     </tr>
   );
@@ -170,7 +172,7 @@ export function DirectoryTable({
             <th className="th-name">website_name</th>
             <th className="th-desc">website_short_description</th>
             <th className="th-llm-txt">llm_txt</th>
-            <th className="th-updated">updated_at</th>
+            <th className="th-updated">Last Updated</th>
           </tr>
         </thead>
         <tbody>{renderRows()}</tbody>

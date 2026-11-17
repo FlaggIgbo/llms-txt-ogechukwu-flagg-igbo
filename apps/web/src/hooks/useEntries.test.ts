@@ -256,7 +256,7 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
       assert.ok(html.includes('Queued'));
     });
 
-    it('shows error next to failed user submissions', () => {
+    it('shows failed status icon next to failed user submissions without error banner', () => {
       const failedUserEntry = {
         ...MOCK_SEED_ENTRIES[0],
         id: 'failed-user-1',
@@ -277,11 +277,12 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
       assert.ok(html.includes('updates-table'));
       assert.ok(html.includes('Failed Site'));
       assert.ok(html.includes('Failed'));
+      assert.ok(html.includes('status-failed-icon'));
       assert.ok(html.includes('Failed to crawl website: HTTP 404'));
-      assert.ok(html.includes('entry-error-tag'));
+      assert.ok(!html.includes('entry-error-tag'));
     });
 
-    it('shows inline error tag when URL already exists in site_entries table', () => {
+    it('shows failed status badge when duplicate URL entry is present', () => {
       const duplicateEntry = {
         ...MOCK_SEED_ENTRIES[0],
         id: 'dup-1',
@@ -301,9 +302,10 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
 
       assert.ok(html.includes('updates-table'));
       assert.ok(html.includes('FastAPI Clone'));
-      assert.ok(html.includes('entry-error-tag'));
-      assert.ok(html.includes('error-duplicate-url'));
+      assert.ok(html.includes('status-failed'));
+      assert.ok(html.includes('status-failed-icon'));
       assert.ok(html.includes('Website URL already exists in site_entries table'));
+      assert.ok(!html.includes('entry-error-tag'));
     });
 
     it('excludes cron-scheduled failed entries from the updates queue', () => {

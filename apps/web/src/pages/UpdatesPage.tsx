@@ -1,6 +1,6 @@
 import React from 'react';
 import type { SiteEntry } from '@llmstxt/shared-types';
-import { resolveLlmTxtUrl } from '../components/DirectoryTable';
+import { resolveLlmTxtUrl, formatDateTime } from '../components/DirectoryTable';
 
 // Props for the updates page.
 export interface UpdatesPageProps {
@@ -9,24 +9,6 @@ export interface UpdatesPageProps {
   error?: string | null;
   onRefresh: () => Promise<void>;
   onNavigateToAdd?: () => void;
-}
-
-// Format an ISO date string into a readable timestamp.
-function formatDateTime(isoString: string): string {
-  if (!isoString) return '—';
-  try {
-    const date = new Date(isoString);
-    if (isNaN(date.getTime())) return isoString;
-    return date.toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return isoString;
-  }
 }
 
 // Render status badge for an updating entry.
@@ -45,7 +27,12 @@ function renderStatusBadge(entry: SiteEntry) {
   }
 
   if (entry.status === 'FAILED') {
-    return <span className="status-badge status-failed">Failed</span>;
+    return (
+      <span className="status-badge status-failed" title={entry.error_message || 'Processing failed'}>
+        <span className="status-failed-icon">✕</span>
+        Failed
+      </span>
+    );
   }
 
   return <span className="status-badge status-updating">Updating</span>;
@@ -145,18 +132,6 @@ export function UpdatesPage({
                     <td className="cell-status">
                       <div className="status-cell-wrapper">
                         {renderStatusBadge(entry)}
-                        {entry.status === 'FAILED' && (
-                          <span
-                            className={`entry-error-tag ${
-                              entry.error_message?.toLowerCase().includes('already exists')
-                                ? 'error-duplicate-url'
-                                : ''
-                            }`}
-                            title={entry.error_message || 'Processing failed'}
-                          >
-                            {entry.error_message || 'Processing failed'}
-                          </span>
-                        )}
                       </div>
                     </td>
                     <td className="cell-llm-txt">
