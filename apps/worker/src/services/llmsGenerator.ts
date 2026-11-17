@@ -104,26 +104,57 @@ function getSectionNameFromUrl(url: string, title: string): string {
 
 // Group links into sections without AI.
 function categorizeWithFallback(scraped: ScrapedPage): CategorizationResult {
+  const crawledUrls = new Set(
+    [scraped.url, ...(scraped.subPages || []).map((s) => s.url)].map((u) =>
+      u.toLowerCase().replace(/\/+$/, '')
+    )
+  );
+
   const sectionMap = new Map<string, SectionLink[]>();
+  const uncrawledLinks: SectionLink[] = [];
 
   for (const link of scraped.links) {
-    const sectionName = getSectionNameFromUrl(link.href, link.title);
+    const cleanUrl = link.href.toLowerCase().replace(/\/+$/, '');
+    const isCrawled = crawledUrls.has(cleanUrl);
 
-    const item: SectionLink = {
-      title: link.title,
-      url: link.href,
-      description: `Guides, reference, and implementation details for ${link.title}.`,
-    };
+    if (isCrawled || !scraped.subPages || scraped.subPages.length === 0) {
+      const sectionName = getSectionNameFromUrl(link.href, link.title);
+      const item: SectionLink = {
+        title: link.title,
+        url: link.href,
+        description: `Guides, reference, and implementation details for ${link.title}.`,
+      };
 
-    if (!sectionMap.has(sectionName)) {
-      sectionMap.set(sectionName, []);
+      if (!sectionMap.has(sectionName)) {
+        sectionMap.set(sectionName, []);
+      }
+      sectionMap.get(sectionName)!.push(item);
+    } else {
+      uncrawledLinks.push({
+        title: link.title,
+        url: link.href,
+        description: `Reference documentation for ${link.title} (Not compiled into llms-full.txt).`,
+      });
     }
-    sectionMap.get(sectionName)!.push(item);
   }
 
   const sections: CategorizedSection[] = [];
   for (const [name, links] of sectionMap.entries()) {
     sections.push({ name, links });
+  }
+
+  if (uncrawledLinks.length > 0) {
+    const existingOptional = sections.find(
+      (s) => s.name.toLowerCase() === 'optional' || s.name.toLowerCase().includes('additional')
+    );
+    if (existingOptional) {
+      existingOptional.links.push(...uncrawledLinks);
+    } else {
+      sections.push({
+        name: 'Optional',
+        links: uncrawledLinks,
+      });
+    }
   }
 
   const lowerUrl = scraped.url.toLowerCase();
@@ -145,6 +176,65 @@ function categorizeWithFallback(scraped: ScrapedPage): CategorizationResult {
     sections,
     siteCategory,
   };
+}
+
+// Align categorized sections with crawled subpages, ensuring uncrawled links are marked and placed in Optional.
+function alignSectionsWithCrawledPages(
+  sections: CategorizedSection[],
+  scraped: ScrapedPage
+): CategorizedSection[] {
+  if (!scraped.subPages || scraped.subPages.length === 0) {
+    return sections;
+  }
+
+  const crawledUrls = new Set(
+    [scraped.url, ...scraped.subPages.map((s) => s.url)].map((u) =>
+      u.toLowerCase().replace(/\/+$/, '')
+    )
+  );
+
+  const primarySections: CategorizedSection[] = [];
+  const uncrawledLinks: SectionLink[] = [];
+
+  for (const sec of sections) {
+    const isExplicitOptional =
+      sec.name.toLowerCase() === 'optional' || sec.name.toLowerCase().includes('additional');
+
+    const compiledLinks: SectionLink[] = [];
+    for (const link of sec.links) {
+      const cleanUrl = link.url.toLowerCase().replace(/\/+$/, '');
+      if (crawledUrls.has(cleanUrl) && !isExplicitOptional) {
+        compiledLinks.push(link);
+      } else {
+        const note = '(Not compiled into llms-full.txt)';
+        const desc = link.description || `Documentation for ${link.title}`;
+        uncrawledLinks.push({
+          ...link,
+          description: desc.includes(note) ? desc : `${desc} ${note}`.trim(),
+        });
+      }
+    }
+
+    if (compiledLinks.length > 0) {
+      primarySections.push({ name: sec.name, links: compiledLinks });
+    }
+  }
+
+  if (uncrawledLinks.length > 0) {
+    const existingOptional = primarySections.find(
+      (s) => s.name.toLowerCase() === 'optional' || s.name.toLowerCase().includes('additional')
+    );
+    if (existingOptional) {
+      existingOptional.links.push(...uncrawledLinks);
+    } else {
+      primarySections.push({
+        name: 'Optional',
+        links: uncrawledLinks,
+      });
+    }
+  }
+
+  return primarySections;
 }
 
 // Use Gemini to group links and write 1-sentence summaries.
@@ -251,7 +341,7 @@ Return ONLY a JSON object matching this schema:
         title: parsed.title ? cleanProjectTitle(parsed.title) : cleanProjectTitle(scraped.title),
         siteDescription: parsed.siteDescription || scraped.description,
         preamble: parsed.preamble,
-        sections: parsed.sections,
+        sections: alignSectionsWithCrawledPages(parsed.sections, scraped),
         siteCategory: category,
       };
     }

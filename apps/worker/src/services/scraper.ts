@@ -2,6 +2,7 @@ import { chromium, type Browser } from 'playwright';
 import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import { NodeHtmlMarkdown } from 'node-html-markdown';
+import { logWarn } from '@llmstxt/logger';
 
 // An extracted link from a page.
 export interface ScrapedLink {
@@ -289,6 +290,72 @@ async function fetchHtmlWithTimeout(url: string, timeoutMs: number = 15000): Pro
   }
 }
 
+// Execute async mapping with bounded concurrency.
+async function pMap<T, R>(
+  items: T[],
+  mapper: (item: T, index: number) => Promise<R>,
+  concurrency: number = 5
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex++;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    () => worker()
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+// Fetch subpages with bounded concurrency, creating fallback placeholders for failed pages.
+async function fetchSubpagesParallel(
+  links: Array<{ title: string; href: string }>,
+  websiteUrl: string,
+  maxSubpages: number = 20,
+  concurrency: number = 5
+): Promise<ScrapedSubPage[]> {
+  const cleanBase = websiteUrl.replace(/\/+$/, '');
+  const subpagesToFetch = links
+    .filter((link) => {
+      const cleanHref = link.href.replace(/\/+$/, '');
+      return cleanHref !== cleanBase;
+    })
+    .slice(0, maxSubpages);
+
+  return pMap(
+    subpagesToFetch,
+    async (link) => {
+      try {
+        const subHtml = await fetchHtmlWithTimeout(link.href, 8000);
+        const subExtracted = extractArticleAndMarkdown(subHtml, link.href);
+        return {
+          url: link.href,
+          title: subExtracted.title || link.title,
+          description: subExtracted.description,
+          markdownContent: subExtracted.markdownContent,
+        };
+      } catch (err) {
+        logWarn(`Failed to fetch subpage ${link.href}:`, err);
+        const reason = err instanceof Error ? err.message : String(err);
+        return {
+          url: link.href,
+          title: link.title,
+          description: '',
+          markdownContent: `*[Content could not be automatically retrieved (${reason})]*`,
+        };
+      }
+    },
+    concurrency
+  );
+}
+
 // Lightweight HTTP + JSDOM scraper fallback when Playwright browser cannot launch.
 async function scrapeWebsiteWithFetch(
   websiteUrl: string,
@@ -305,24 +372,7 @@ async function scrapeWebsiteWithFetch(
     });
   }
 
-  const subPages: ScrapedSubPage[] = [];
-  const subpagesToFetch = links.slice(0, 5);
-
-  for (const link of subpagesToFetch) {
-    if (link.href === websiteUrl) continue;
-    try {
-      const subHtml = await fetchHtmlWithTimeout(link.href, 12000);
-      const subExtracted = extractArticleAndMarkdown(subHtml, link.href);
-      subPages.push({
-        url: link.href,
-        title: subExtracted.title || link.title,
-        description: subExtracted.description,
-        markdownContent: subExtracted.markdownContent,
-      });
-    } catch {
-      // Skip failed subpage.
-    }
-  }
+  const subPages = await fetchSubpagesParallel(links, websiteUrl, 20, 5);
 
   return {
     url: websiteUrl,
@@ -400,31 +450,8 @@ export async function scrapeWebsite(rawWebsiteUrl: string): Promise<ScrapedPage>
       });
     }
 
-    // Fetch up to 5 subpages for llms-full.txt.
-    const subPages: ScrapedSubPage[] = [];
-    const subpagesToFetch = links.slice(0, 5);
-
-    for (const link of subpagesToFetch) {
-      if (link.href === websiteUrl) continue;
-      try {
-        await page.goto(link.href, {
-          waitUntil: 'domcontentloaded',
-          timeout: 15000,
-        });
-
-        const subHtml = await page.content();
-        const subExtracted = extractArticleAndMarkdown(subHtml, link.href);
-
-        subPages.push({
-          url: link.href,
-          title: subExtracted.title || link.title,
-          description: subExtracted.description,
-          markdownContent: subExtracted.markdownContent,
-        });
-      } catch {
-        // Skip failed subpage.
-      }
-    }
+    // Fetch up to 20 subpages in parallel for llms-full.txt using fast HTTP fetch.
+    const subPages = await fetchSubpagesParallel(links, websiteUrl, 20, 5);
 
     return {
       url: websiteUrl,

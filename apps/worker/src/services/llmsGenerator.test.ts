@@ -4,6 +4,7 @@ import {
   generateLlmsTxtFiles,
   cleanProjectTitle,
   formatLlmsTxt,
+  formatLlmsFullTxt,
   getInitialIntervalForCategory,
   validateLlmsTxt,
   validateLlmsFullTxt,
@@ -84,6 +85,12 @@ test('generateLlmsTxtFiles: builds compliant files and infers siteCategory', asy
         description: 'First steps guide.',
         markdownContent: '## Getting Started\n\nRun `npm install`.',
       },
+      {
+        url: 'https://example.com/api/endpoints',
+        title: 'API Endpoints',
+        description: 'Endpoints reference.',
+        markdownContent: '## API Endpoints\n\nAPI details.',
+      },
     ],
   };
 
@@ -104,12 +111,36 @@ test('generateLlmsTxtFiles: builds compliant files and infers siteCategory', asy
   assert.ok(llmsTxt.includes('## API Reference'));
   assert.ok(llmsTxt.includes('## Optional'));
   assert.ok(llmsTxt.includes('- [Getting Started Guide](https://example.com/docs/getting-started):'));
+  assert.ok(llmsTxt.includes('(Not compiled into llms-full.txt)'));
 
   assert.ok(llmsFullTxt.startsWith('# Example Project\n\n> An open-source library for automated testing.'));
   assert.ok(llmsFullTxt.includes('## Overview'));
   assert.ok(llmsFullTxt.includes('Run `npm install`'));
 
   assert.equal(siteCategory, SiteCategory.API_DOCS);
+});
+
+test('formatLlmsFullTxt: renders failure placeholders when subpages fail to crawl', () => {
+  const page: ScrapedPage = {
+    url: 'https://example.com',
+    title: 'Test App',
+    description: 'A test app description.',
+    textContent: 'Main content.',
+    markdownContent: '## Main Page\n\nMain content.',
+    links: [{ title: 'Auth', href: 'https://example.com/auth' }],
+    subPages: [
+      {
+        url: 'https://example.com/auth',
+        title: 'Authentication',
+        description: '',
+        markdownContent: '*[Content could not be automatically retrieved (HTTP 403 Forbidden)]*',
+      },
+    ],
+  };
+
+  const fullTxt = formatLlmsFullTxt(page.title, page.description, page);
+  assert.ok(fullTxt.includes('## Authentication\nURL: https://example.com/auth'));
+  assert.ok(fullTxt.includes('*[Content could not be automatically retrieved (HTTP 403 Forbidden)]*'));
 });
 
 test('getInitialIntervalForCategory: returns standard seed cadence intervals', () => {
