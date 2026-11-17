@@ -103,7 +103,7 @@ export function matchesSearch(item: SiteEntry, query: string): boolean {
 }
 
 // Fetch, filter, search, paginate, and submit directory entries.
-export function useEntries(searchQuery = '', initialPage = 1, pageSize = 10): UseEntriesResult {
+export function useEntries(searchQuery = '', initialPage = 1, pageSize = 50): UseEntriesResult {
   const [entries, setEntries] = useState<SiteEntry[]>([]);
   const [allEntries, setAllEntries] = useState<SiteEntry[]>([]);
   const [total, setTotal] = useState(0);

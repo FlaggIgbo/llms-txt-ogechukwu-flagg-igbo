@@ -430,9 +430,9 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
       );
 
       assert.ok(html.includes('pagination-controls'));
-      assert.ok(html.includes('Previous'));
+      assert.ok(html.includes('Back'));
       assert.ok(html.includes('Page 1 of 2'));
-      assert.ok(html.includes('Next'));
+      assert.ok(html.includes('Forward'));
       assert.ok(html.includes('Showing 2 of 4 entries'));
     });
   });

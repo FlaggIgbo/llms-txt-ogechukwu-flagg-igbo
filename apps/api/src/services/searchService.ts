@@ -3,9 +3,9 @@ import { db } from '@llmstxt/database';
 
 // Wrapper around database search methods.
 export class SearchService {
-  // Get all entries.
-  async getAllEntries(): Promise<SiteEntry[]> {
-    return db.listEntries();
+  // Get all entries with pagination.
+  async getAllEntries(limit = 50, offset = 0): Promise<SearchResult> {
+    return db.searchEntries('', limit, offset);
   }
 
   // Search entries with query, limit, and offset.

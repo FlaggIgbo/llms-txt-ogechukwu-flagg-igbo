@@ -65,7 +65,7 @@ export function HomePage({
                 : `Showing ${entries.length} ${entryLabel}`}
             </span>
 
-            {totalPages > 1 && onPageChange && (
+            {onPageChange && (
               <div
                 className="pagination-controls"
                 role="navigation"
@@ -73,24 +73,24 @@ export function HomePage({
               >
                 <button
                   type="button"
-                  className="pagination-btn"
+                  className="pagination-btn pagination-back"
                   onClick={() => onPageChange(Math.max(1, page - 1))}
                   disabled={page <= 1}
-                  aria-label="Previous page"
+                  aria-label="Previous page (Back)"
                 >
-                  Previous
+                  Back
                 </button>
                 <span className="pagination-info">
                   {`Page ${page} of ${totalPages}`}
                 </span>
                 <button
                   type="button"
-                  className="pagination-btn"
+                  className="pagination-btn pagination-forward"
                   onClick={() => onPageChange(Math.min(totalPages, page + 1))}
                   disabled={page >= totalPages}
-                  aria-label="Next page"
+                  aria-label="Next page (Forward)"
                 >
-                  Next
+                  Forward
                 </button>
               </div>
             )}
