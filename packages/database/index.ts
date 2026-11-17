@@ -9,6 +9,7 @@ import {
   EntryStatus,
   EntryErrorCode,
   EntryErrorMessage,
+  SiteCategory,
 } from '@llmstxt/shared-types';
 import { logWarn } from '@llmstxt/logger';
 import {
@@ -442,7 +443,7 @@ export class DatabaseClient {
   // Transactionally insert entry and its cadence schedule.
   async createEntryWithCadence(
     input: CreateSiteEntryRequest,
-    siteCategory: string = 'api_docs',
+    siteCategory: SiteCategory | string = SiteCategory.API_DOCS,
     intervalHours: number = 24
   ): Promise<{ entry: SiteEntry; cadence: SiteCadence }> {
     const isDev = isDevMode();

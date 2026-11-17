@@ -8,6 +8,7 @@ import {
   validateLlmsTxt,
   validateLlmsFullTxt,
   assertValidLlmsFiles,
+  SiteCategory,
 } from './llmsGenerator.js';
 import { computeNextCadence } from './cadenceCalculator.js';
 import type { ScrapedPage } from './scraper.js';
@@ -108,13 +109,13 @@ test('generateLlmsTxtFiles: builds compliant files and infers siteCategory', asy
   assert.ok(llmsFullTxt.includes('## Overview'));
   assert.ok(llmsFullTxt.includes('Run `npm install`'));
 
-  assert.equal(siteCategory, 'api_docs');
+  assert.equal(siteCategory, SiteCategory.API_DOCS);
 });
 
 test('getInitialIntervalForCategory: returns standard seed cadence intervals', () => {
-  assert.equal(getInitialIntervalForCategory('blog'), 12);
-  assert.equal(getInitialIntervalForCategory('marketing'), 72);
-  assert.equal(getInitialIntervalForCategory('api_docs'), 168);
+  assert.equal(getInitialIntervalForCategory(SiteCategory.BLOG), 12);
+  assert.equal(getInitialIntervalForCategory(SiteCategory.MARKETING), 72);
+  assert.equal(getInitialIntervalForCategory(SiteCategory.API_DOCS), 168);
 });
 
 test('computeNextCadence: handles adaptive backoff correctly', () => {

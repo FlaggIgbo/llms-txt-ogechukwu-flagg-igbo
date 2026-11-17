@@ -119,13 +119,17 @@ export interface GenerateJobPayload {
 export type CadenceStatus = 'idle' | 'queued' | 'processing';
 
 // Known category types for a website.
-export type SiteCategory = 'api_docs' | 'blog' | 'marketing';
+export enum SiteCategory {
+  API_DOCS = 'api_docs',
+  BLOG = 'blog',
+  MARKETING = 'marketing',
+}
 
 // Record of a site's update cadence and schedule.
 export interface SiteCadence {
   site_id: string;
   url: string;
-  site_category: string | null;
+  site_category: SiteCategory | string | null;
   check_interval_hours: number;
   unchanged_streak: number;
   etag: string | null;

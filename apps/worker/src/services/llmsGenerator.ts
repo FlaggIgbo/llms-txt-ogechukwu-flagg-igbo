@@ -1,14 +1,15 @@
 import { logWarn } from '@llmstxt/logger';
+import { SiteCategory } from '@llmstxt/shared-types';
 import type { ScrapedPage } from './scraper.js';
 
 // Known category types for a website.
-export const KNOWN_CATEGORIES = ['api_docs', 'blog', 'marketing'] as const;
-export type SiteCategory = (typeof KNOWN_CATEGORIES)[number];
+export { SiteCategory };
+export const KNOWN_CATEGORIES = Object.values(SiteCategory);
 
 // Get default check interval for a site category.
 export function getInitialIntervalForCategory(category: SiteCategory): number {
-  if (category === 'blog') return 12;
-  if (category === 'marketing') return 72;
+  if (category === SiteCategory.BLOG) return 12;
+  if (category === SiteCategory.MARKETING) return 72;
   return 168; // api_docs default
 }
 
@@ -127,11 +128,11 @@ function categorizeWithFallback(scraped: ScrapedPage): CategorizationResult {
 
   const lowerUrl = scraped.url.toLowerCase();
   const lowerTitle = scraped.title.toLowerCase();
-  let siteCategory: SiteCategory = 'api_docs';
+  let siteCategory: SiteCategory = SiteCategory.API_DOCS;
   if (lowerUrl.includes('blog') || lowerTitle.includes('blog') || lowerUrl.includes('changelog')) {
-    siteCategory = 'blog';
+    siteCategory = SiteCategory.BLOG;
   } else if (!lowerUrl.includes('doc') && !lowerTitle.includes('doc') && !lowerUrl.includes('api')) {
-    siteCategory = 'marketing';
+    siteCategory = SiteCategory.MARKETING;
   }
 
   const siteDescription =
@@ -233,16 +234,16 @@ Return ONLY a JSON object matching this schema:
 
     if (parsed && Array.isArray(parsed.sections)) {
       // Validate category; log warning if LLM returns an unknown category.
-      let category: SiteCategory = 'api_docs';
+      let category: SiteCategory = SiteCategory.API_DOCS;
       if (parsed.siteCategory) {
         const normalized = String(parsed.siteCategory).toLowerCase().trim();
         if ((KNOWN_CATEGORIES as readonly string[]).includes(normalized)) {
           category = normalized as SiteCategory;
         } else {
           logWarn(
-            `[Warning] Unknown site category returned by LLM: "${parsed.siteCategory}". Defaulting to "api_docs".`
+            `[Warning] Unknown site category returned by LLM: "${parsed.siteCategory}". Defaulting to "${SiteCategory.API_DOCS}".`
           );
-          category = 'api_docs';
+          category = SiteCategory.API_DOCS;
         }
       }
 
@@ -356,7 +357,7 @@ export async function generateLlmsTxtFiles(
       llmsFullTxt:
         scraped.officialLlmsFullTxt ||
         formatLlmsFullTxt(scraped.title, scraped.description, scraped),
-      siteCategory: 'api_docs',
+      siteCategory: SiteCategory.API_DOCS,
     };
   }
 
@@ -381,7 +382,7 @@ export async function generateLlmsTxtFiles(
   return {
     llmsTxt,
     llmsFullTxt,
-    siteCategory: categorized.siteCategory || 'api_docs',
+    siteCategory: categorized.siteCategory || SiteCategory.API_DOCS,
   };
 }
 
