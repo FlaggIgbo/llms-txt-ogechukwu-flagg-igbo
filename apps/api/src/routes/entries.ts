@@ -1,4 +1,4 @@
-import { db } from '@llmstxt/database';
+import { db, DuplicateEntryError } from '@llmstxt/database';
 import { generationQueue } from '@llmstxt/queue';
 import {
   type SiteEntry,
@@ -162,17 +162,25 @@ export async function handlePostEntry(
       return;
     }
 
+    // Return 409 Conflict if URL already exists with COMPLETED status.
+    const existing = await db.getEntryByUrl(body.website_url);
+    if (existing && existing.status === EntryStatus.COMPLETED) {
+      sendJsonResponse(res, 409, {
+        error: ApiErrorMessage.DUPLICATE_URL,
+        code: ApiErrorCode.CONFLICT,
+      });
+      return;
+    }
+
     // Insert into site_entries and site_cadence in one transaction.
     const { entry } = await db.createEntryWithCadence(body);
 
-    // Queue background generation job only if not already failed (e.g. duplicate URL).
-    if (entry.status !== EntryStatus.FAILED) {
-      await generationQueue.enqueueGenerateJob({
-        entryId: entry.id,
-        websiteUrl: entry.website_url,
-        isScheduledUpdate: false,
-      });
-    }
+    // Queue background generation job.
+    await generationQueue.enqueueGenerateJob({
+      entryId: entry.id,
+      websiteUrl: entry.website_url,
+      isScheduledUpdate: false,
+    });
 
     // Record submission for rate limiter.
     recordIpSubmission(clientIp);
@@ -182,6 +190,13 @@ export async function handlePostEntry(
       'X-RateLimit-Remaining': String(Math.max(0, rateCheck.remaining - 1)),
     });
   } catch (error) {
+    if (error instanceof DuplicateEntryError || (error as { name?: string })?.name === 'DuplicateEntryError') {
+      sendJsonResponse(res, 409, {
+        error: ApiErrorMessage.DUPLICATE_URL,
+        code: ApiErrorCode.CONFLICT,
+      });
+      return;
+    }
     logError(error, { endpoint: 'POST /entries' });
     sendJsonResponse(res, 500, {
       error: ApiErrorMessage.CREATE_ENTRY_FAILED,

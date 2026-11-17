@@ -28,6 +28,7 @@ export enum ApiErrorCode {
   UNAUTHORIZED = 'UNAUTHORIZED',
   FORBIDDEN = 'FORBIDDEN',
   NOT_FOUND = 'NOT_FOUND',
+  CONFLICT = 'CONFLICT',
   RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED',
   DATABASE_ERROR = 'DATABASE_ERROR',
   INTERNAL_ERROR = 'INTERNAL_ERROR',
@@ -38,6 +39,8 @@ export enum ApiErrorCode {
 export enum ApiErrorMessage {
   FORBIDDEN = 'Forbidden',
   NOT_FOUND = 'File not found',
+  CONFLICT = 'Conflict',
+  DUPLICATE_URL = 'Website URL already exists in site_entries table',
   RATE_LIMIT_EXCEEDED = 'You have exceeded your allowed entry adds for today (maximum 20 entries per day). Please try again tomorrow.',
   WEBSITE_URL_REQUIRED = 'website_url is required',
   GET_ENTRIES_FAILED = 'Failed to retrieve site entries from database',

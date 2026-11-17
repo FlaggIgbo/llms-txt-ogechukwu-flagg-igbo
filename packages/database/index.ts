@@ -10,6 +10,8 @@ import {
   EntryErrorCode,
   EntryErrorMessage,
   SiteCategory,
+  ApiErrorCode,
+  ApiErrorMessage,
 } from '@llmstxt/shared-types';
 import { logWarn } from '@llmstxt/logger';
 import {
@@ -23,7 +25,6 @@ import {
   INSERT_ENTRY_SQL,
   buildUpdateEntrySql,
   SELECT_STALE_ENTRIES_SQL,
-  INSERT_DUPLICATE_FAILED_ENTRY_SQL,
   INSERT_ENTRY_TRANSACTION_SQL,
   SELECT_CADENCE_BY_SITE_ID_SQL,
   INSERT_CADENCE_TRANSACTION_SQL,
@@ -192,6 +193,15 @@ function entryMatchesQuery(entry: SiteEntry, lowerQuery: string): boolean {
   const desc = (entry.website_short_description || '').toLowerCase();
   const url = (entry.website_url || '').toLowerCase();
   return name.includes(lowerQuery) || desc.includes(lowerQuery) || url.includes(lowerQuery);
+}
+
+// Error thrown when submitting a URL that already exists with COMPLETED status.
+export class DuplicateEntryError extends Error {
+  readonly code = ApiErrorCode.CONFLICT;
+  constructor(message: string = ApiErrorMessage.DUPLICATE_URL) {
+    super(message);
+    this.name = 'DuplicateEntryError';
+  }
 }
 
 // Handles all PostgreSQL queries.
@@ -452,61 +462,10 @@ export class DatabaseClient {
     const llmsTxt = input.llms_txt_storage || input.llms_txt_url || input.llm_txt || null;
     const llmsFullTxt = input.llms_full_txt_storage || input.llms_full_txt_url || null;
 
-    // Check if the URL already exists in our site_entries table.
+    // Check if the URL already exists in our site_entries table with COMPLETED status.
     const existing = await this.getEntryByUrl(input.website_url);
     if (existing && existing.status === EntryStatus.COMPLETED) {
-      const duplicateError = EntryErrorMessage.DUPLICATE_URL;
-      const id = `00000000-0000-0000-0000-${Date.now().toString().slice(-12).padStart(12, '0')}`;
-      const duplicateEntry: SiteEntry = {
-        id,
-        website_name: websiteName || existing.website_name,
-        website_url: input.website_url,
-        website_short_description: description || existing.website_short_description,
-        is_updated_latest: false,
-        llms_txt_storage: llmsTxt || existing.llms_txt_storage,
-        llms_full_txt_storage: llmsFullTxt || existing.llms_full_txt_storage,
-        llm_txt: llmsTxt || existing.llm_txt,
-        status: EntryStatus.FAILED,
-        error_message: duplicateError,
-        error_code: EntryErrorCode.DUPLICATE_URL,
-        is_scheduled_update: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      const duplicateCadence: SiteCadence = {
-        site_id: id,
-        url: input.website_url,
-        site_category: siteCategory,
-        check_interval_hours: intervalHours,
-        unchanged_streak: 0,
-        etag: null,
-        last_modified: null,
-        last_content_hash: null,
-        last_checked_at: null,
-        next_check_at: new Date().toISOString(),
-        status: 'idle',
-      };
-
-      if (isDev) {
-        MOCK_SEED_ENTRIES.unshift(duplicateEntry);
-        return { entry: duplicateEntry, cadence: duplicateCadence };
-      }
-
-      try {
-        const pool = this.getPool();
-        const res = await pool.query<SiteEntry>(INSERT_DUPLICATE_FAILED_ENTRY_SQL, [
-          duplicateEntry.website_name,
-          duplicateEntry.website_url,
-          duplicateEntry.website_short_description,
-          duplicateEntry.llms_txt_storage,
-          duplicateEntry.llms_full_txt_storage,
-          duplicateError,
-          EntryErrorCode.DUPLICATE_URL,
-        ]);
-        return { entry: formatRow(res.rows[0]), cadence: duplicateCadence };
-      } catch {
-        return { entry: duplicateEntry, cadence: duplicateCadence };
-      }
+      throw new DuplicateEntryError(ApiErrorMessage.DUPLICATE_URL);
     }
 
     try {

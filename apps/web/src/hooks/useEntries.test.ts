@@ -19,11 +19,18 @@ import {
   recordIpSubmission,
   resetRateLimits,
 } from '../../../../apps/api/src/services/rateLimiter.js';
-import { db } from '@llmstxt/database';
+import { db, DuplicateEntryError } from '@llmstxt/database';
 import { HomePage } from '../pages/HomePage.js';
 import { AddEntryPage } from '../pages/AddEntryPage.js';
 import { UpdatesPage } from '../pages/UpdatesPage.js';
-import { EntryStatus, EntryErrorCode, EntryErrorMessage } from '@llmstxt/shared-types';
+import {
+  EntryStatus,
+  EntryErrorCode,
+  EntryErrorMessage,
+  ApiErrorCode,
+  ApiErrorMessage,
+} from '@llmstxt/shared-types';
+import { handlePostEntry } from '../../../../apps/api/src/routes/entries.js';
 import { App } from '../App.js';
 
 describe('useEntries and MOCK_SEED_ENTRIES', () => {
@@ -387,17 +394,56 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
   });
 
   describe('Duplicate URL detection in site_entries', () => {
-    it('creates a failed entry with error tag when URL already exists in site_entries table', async () => {
-      const result = await db.createEntryWithCadence({
-        website_url: 'https://fastapi.tiangolo.com', // Already in MOCK_SEED_ENTRIES
-        website_name: 'FastAPI Clone',
-      });
+    it('throws DuplicateEntryError and writes nothing when URL already exists with COMPLETED status', async () => {
+      const initialSeedCount = MOCK_SEED_ENTRIES.length;
 
-      assert.equal(result.entry.status, EntryStatus.FAILED);
-      assert.equal(result.entry.is_scheduled_update, false);
-      assert.equal(result.entry.error_code, EntryErrorCode.DUPLICATE_URL);
-      assert.equal(result.entry.error_message, EntryErrorMessage.DUPLICATE_URL);
-      assert.ok(result.entry.error_message?.includes('already exists in site_entries'));
+      await assert.rejects(
+        async () => {
+          await db.createEntryWithCadence({
+            website_url: 'https://fastapi.tiangolo.com', // Already in MOCK_SEED_ENTRIES with COMPLETED status
+            website_name: 'FastAPI Clone',
+          });
+        },
+        (err: unknown) => {
+          assert.ok(err instanceof DuplicateEntryError || (err as Error).name === 'DuplicateEntryError');
+          assert.equal((err as Error).message, ApiErrorMessage.DUPLICATE_URL);
+          return true;
+        }
+      );
+
+      // Verify no phantom entry was created in mock seed data
+      assert.equal(MOCK_SEED_ENTRIES.length, initialSeedCount);
+    });
+
+    it('returns HTTP 409 Conflict rest response on POST /entries when URL already exists', async () => {
+      let statusCode = 0;
+      let responseBody = '';
+      const headers: Record<string, string> = {};
+
+      const mockReq: any = {
+        headers: { 'x-forwarded-for': '127.0.0.1' },
+        body: {
+          website_url: 'https://fastapi.tiangolo.com',
+          website_name: 'FastAPI Duplicate',
+        },
+      };
+
+      const mockRes: any = {
+        writeHead: (code: number, hdrs: Record<string, string>) => {
+          statusCode = code;
+          Object.assign(headers, hdrs);
+        },
+        end: (data: string) => {
+          responseBody = data;
+        },
+      };
+
+      await handlePostEntry(mockReq, mockRes);
+
+      assert.equal(statusCode, 409);
+      const parsed = JSON.parse(responseBody);
+      assert.equal(parsed.error, ApiErrorMessage.DUPLICATE_URL);
+      assert.equal(parsed.code, ApiErrorCode.CONFLICT);
     });
   });
 });
