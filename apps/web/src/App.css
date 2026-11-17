@@ -136,7 +136,7 @@ body {
 .form-label {
   font-weight: 600;
   font-size: 0.9rem;
-  color: var(--color-text-primary);
+  color: #4b5563;
 }
 
 .required-star {
