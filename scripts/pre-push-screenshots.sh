@@ -104,3 +104,4 @@ else
   echo "✅ Screenshots are already up to date with frontend changes."
   exit 0
 fi
+
