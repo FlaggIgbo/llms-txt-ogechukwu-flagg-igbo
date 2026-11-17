@@ -50,6 +50,13 @@ export function startApiServer(port: number = PORT): void {
         await handleSearch(req, res);
         return;
       }
+      if ((pathname === '/queue/bounce' || pathname === '/bounce') && (req.method === 'POST' || req.method === 'GET')) {
+        const { generationQueue } = await import('@llmstxt/queue');
+        await generationQueue.bounceQueue();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok', message: 'Queue bounced successfully. Dead letter jobs cleared and failed entries re-enqueued.' }));
+        return;
+      }
 
       // Serve stored .txt files via Cloudflare R2 / S3 redirect.
       if (pathname.startsWith('/storage/') && req.method === 'GET') {

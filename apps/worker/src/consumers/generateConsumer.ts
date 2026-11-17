@@ -86,7 +86,7 @@ export async function handleGenerateJob(payload: GenerateJobPayload): Promise<vo
     // Update main entry record.
     await db.updateEntry(entryId, {
       website_name: scraped.title,
-      website_short_description: scraped.description || undefined,
+      website_short_description: scraped.description || scraped.title || 'Documentation and website overview',
       is_updated_latest: true,
       llms_txt_storage: uploaded.llmsTxtUri,
       llms_full_txt_storage: uploaded.llmsFullTxtUri,

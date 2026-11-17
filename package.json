@@ -12,6 +12,7 @@
     "dev:web": "npm run dev --workspace=@llmstxt/web",
     "dev:api": "npm run dev --workspace=@llmstxt/api",
     "dev:worker": "npm run dev --workspace=@llmstxt/worker",
+    "start:worker": "npm run start --workspace=@llmstxt/worker",
     "dev:cron": "npm run dev --workspace=@llmstxt/cron-updater",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",

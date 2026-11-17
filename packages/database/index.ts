@@ -36,6 +36,9 @@ import {
   SELECT_DEAD_LETTER_JOBS_SQL,
   RESET_PROCESSING_JOBS_SQL,
   DELETE_DEAD_LETTER_JOBS_SQL,
+  BOUNCE_RESET_BACKGROUND_JOBS_SQL,
+  BOUNCE_RESET_FAILED_ENTRIES_SQL,
+  BOUNCE_REENQUEUE_PENDING_ENTRIES_SQL,
 } from './queries.js';
 
 export { MOCK_SEED_ENTRIES };
@@ -259,6 +262,9 @@ export class DatabaseClient {
     let paramIndex = 1;
 
     for (const [key, val] of Object.entries(patch)) {
+      if (val === undefined) {
+        continue;
+      }
       sets.push(`${key} = $${paramIndex}`);
       values.push(val);
       paramIndex += 1;
@@ -437,8 +443,10 @@ export class DatabaseClient {
   // Bounce the queue: resets active/processing jobs and clears dead letter jobs.
   async bounceJobQueue(): Promise<void> {
     const pool = this.getPool();
-    await pool.query(RESET_PROCESSING_JOBS_SQL);
-    await pool.query(DELETE_DEAD_LETTER_JOBS_SQL);
+    await pool.query(BOUNCE_RESET_BACKGROUND_JOBS_SQL).catch(() => pool.query(RESET_PROCESSING_JOBS_SQL));
+    await pool.query(DELETE_DEAD_LETTER_JOBS_SQL).catch(() => {});
+    await pool.query(BOUNCE_RESET_FAILED_ENTRIES_SQL).catch(() => {});
+    await pool.query(BOUNCE_REENQUEUE_PENDING_ENTRIES_SQL).catch(() => {});
   }
 }
 

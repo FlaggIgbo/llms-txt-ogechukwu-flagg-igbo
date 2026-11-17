@@ -13,6 +13,7 @@ import {
   SectionName,
 } from './llmsGenerator.js';
 import { computeNextCadence } from './cadenceCalculator.js';
+import { checkExistingLlmsTxt } from './scraper.js';
 import type { ScrapedPage } from './scraper.js';
 
 test('cleanProjectTitle: extracts canonical project name without tagline clutter', () => {
@@ -261,4 +262,11 @@ test('computeNextCadence: initializes category baseline without backoff on initi
   });
   assert.equal(blogResult.newIntervalHours, 12);
   assert.equal(blogResult.newStreak, 0);
+});
+
+test('checkExistingLlmsTxt: discovers official llms.txt on docs.[domain] subdomains', async () => {
+  const result = await checkExistingLlmsTxt('https://perplexity.ai');
+  assert.ok(result !== null);
+  assert.ok(result.llmsTxt.includes('Perplexity'));
+  assert.ok(result.llmsFullTxt && result.llmsFullTxt.length > 0);
 });

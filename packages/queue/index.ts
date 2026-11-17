@@ -261,6 +261,9 @@ export class GenerationQueue {
     this.deadLetterQueue = [];
     await db.bounceJobQueue().catch(() => {});
     logWarn('[GenerationQueue] Queue has been bounced by operator.');
+    if (this.dbPollingTimer && this.handlers.length > 0) {
+      void this.pollDatabaseQueue();
+    }
   }
 
   // Get count of currently active in-flight jobs.

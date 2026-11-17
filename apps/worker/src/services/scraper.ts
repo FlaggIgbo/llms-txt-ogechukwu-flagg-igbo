@@ -131,7 +131,19 @@ async function safeFetch(
     }
 
     const res = await fetch(current, {
-      headers: { 'User-Agent': USER_AGENT, ...headers },
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"macOS"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        ...headers,
+      },
       redirect: 'manual',
       signal,
     });
@@ -199,12 +211,17 @@ export async function checkExistingLlmsTxt(websiteUrl: string): Promise<Official
     return null;
   }
 
-  // Check subpath first (e.g. /docs/llms.txt), then root (/llms.txt).
+  // Check subpath first (e.g. /docs/llms.txt), then root (/llms.txt), then docs.[domain]/llms.txt.
   const basePath = parsed.pathname.replace(/\/+$/, '');
   const candidates = [
     ...(basePath ? [`${parsed.origin}${basePath}/llms.txt`] : []),
     `${parsed.origin}/llms.txt`,
   ];
+
+  const cleanHost = parsed.hostname.replace(/^www\./i, '');
+  if (!cleanHost.toLowerCase().startsWith('docs.') && cleanHost.includes('.')) {
+    candidates.push(`${parsed.protocol}//docs.${cleanHost}/llms.txt`);
+  }
 
   for (const candidate of candidates) {
     const llmsTxt = await tryFetchLlmsFile(candidate);

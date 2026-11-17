@@ -349,6 +349,35 @@ export const RESET_PROCESSING_JOBS_SQL =
   "UPDATE background_jobs SET status = 'QUEUED', updated_at = NOW() WHERE status = 'PROCESSING'";
 
 /**
+ * Resets any processing, dead letter, or failed jobs back to QUEUED with 0 attempts.
+ */
+export const BOUNCE_RESET_BACKGROUND_JOBS_SQL = `
+  UPDATE background_jobs
+  SET status = 'QUEUED', attempts = 0, last_error = NULL, failed_at = NULL, updated_at = NOW()
+  WHERE status IN ('PROCESSING', 'DEAD_LETTER', 'FAILED')
+`;
+
+/**
+ * Resets failed site entries back to PENDING so they are re-crawled and generated.
+ */
+export const BOUNCE_RESET_FAILED_ENTRIES_SQL = `
+  UPDATE site_entries
+  SET status = 'PENDING', error_message = NULL, error_code = NULL, updated_at = NOW()
+  WHERE status = 'FAILED'
+`;
+
+/**
+ * Re-enqueues background jobs for any PENDING site entries not already in the queue.
+ */
+export const BOUNCE_REENQUEUE_PENDING_ENTRIES_SQL = `
+  INSERT INTO background_jobs (entry_id, website_url, is_scheduled_update, status, attempts, max_attempts)
+  SELECT id, website_url, is_scheduled_update, 'QUEUED', 0, 3
+  FROM site_entries
+  WHERE status = 'PENDING'
+    AND id NOT IN (SELECT entry_id FROM background_jobs WHERE status IN ('QUEUED', 'PROCESSING'))
+`;
+
+/**
  * Purges all dead letter queue jobs permanently.
  */
 export const DELETE_DEAD_LETTER_JOBS_SQL = "DELETE FROM background_jobs WHERE status = 'DEAD_LETTER'";

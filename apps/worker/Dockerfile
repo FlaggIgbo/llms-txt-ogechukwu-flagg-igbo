@@ -14,4 +14,4 @@ RUN npm install --ignore-scripts
 # Install Playwright Chromium with system dependencies (runs as root inside container)
 RUN npx playwright install --with-deps chromium
 
-CMD ["npm", "run", "dev:worker"]
+CMD ["npm", "run", "start:worker"]
