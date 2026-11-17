@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { CreateSiteEntryRequest } from '@llmstxt/shared-types';
+import { type CreateSiteEntryRequest, ApiErrorMessage } from '@llmstxt/shared-types';
 
 // Maximum allowed submissions per day.
 export const DAILY_ENTRY_LIMIT = 20;
@@ -113,9 +113,7 @@ export function SubmissionForm({ onSubmit, onNavigateToUpdates }: SubmissionForm
 
     // Enforce daily rate limit (20 entries per day).
     if (isSessionRateLimited()) {
-      setSubmitError(
-        'You have exceeded your allowed entry adds for today (maximum 20 entries per day). Please try again tomorrow.'
-      );
+      setSubmitError(ApiErrorMessage.RATE_LIMIT_EXCEEDED);
       return;
     }
 
@@ -192,9 +190,7 @@ export function SubmissionForm({ onSubmit, onNavigateToUpdates }: SubmissionForm
 
       {isRateLimited && !submitError && (
         <div className="error-banner form-error-banner" role="alert">
-          <span>
-            You have exceeded your allowed entry adds for today (maximum 20 entries per day). Please try again tomorrow.
-          </span>
+          <span>{ApiErrorMessage.RATE_LIMIT_EXCEEDED}</span>
         </div>
       )}
 
