@@ -19,31 +19,13 @@ By tracking component and page screenshots in Git, every pull request automatica
 
 ```
 screenshots/
-├── components/                       # Individual frontend component snapshots
-│   ├── directory-card-standard.png   # DirectoryCard with complete metadata & badges
-│   ├── directory-card-minimal.png    # DirectoryCard with minimal attributes
-│   ├── directory-table-populated.png # DirectoryTable populated with entries
-│   ├── directory-table-loading.png   # DirectoryTable loading state
-│   ├── directory-table-empty.png     # DirectoryTable empty state ("No results")
-│   ├── navigation-tabs.png           # Navigation header tabs with active indicator & badge
-│   ├── search-bar-empty.png          # SearchBar default state
-│   ├── search-bar-filled.png         # SearchBar with input text
-│   ├── submission-form-empty.png     # SubmissionForm initial blank state
-│   ├── submission-form-validation.png# SubmissionForm showing inline validation errors
-│   ├── submission-form-filled.png    # SubmissionForm with valid input data
-│   └── pagination-controls.png       # PaginationControls component with Back, Page X of Y, and Forward
-│
-└── pages/                            # Full-page responsive views
-    ├── home-page.png                 # Main directory page (Desktop 1280x800)
-    ├── home-page-mobile.png          # Main directory page (Mobile 390x844)
-    ├── home-page-filtered.png        # Home page with active search query
-    ├── home-page-empty.png           # Home page with no matching search results
-    ├── add-entry-page.png            # Add Entry page (Desktop 1280x800)
-    ├── add-entry-page-mobile.png     # Add Entry page (Mobile 390x844)
-    ├── updates-page.png              # Updates tab with queued/processing entries
-    ├── updates-page-mobile.png       # Updates tab on mobile
-    └── updates-page-empty.png        # Updates tab empty state ("All sites up to date")
+├── components/   # Isolated UI component snapshots across various states
+│                 # (e.g., default, populated, loading, validation, and empty states)
+└── pages/        # Full-page responsive views across desktop (1280x800) and mobile (390x844)
+                  # viewports for key application routes and search states
 ```
+
+Snapshots are configured and driven by `scripts/generate-screenshots.ts` using deterministic dates, mocked network responses, and disabled animations.
 
 ---
 
