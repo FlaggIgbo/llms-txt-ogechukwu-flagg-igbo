@@ -215,17 +215,17 @@ export async function checkExistingLlmsTxt(websiteUrl: string): Promise<Official
     return null;
   }
 
-  // Check docs.[domain]/llms.txt first, then subpath (/docs/llms.txt), then root (/llms.txt).
+  // Check subpath (/docs/llms.txt) first if given, then docs.[domain]/llms.txt, then root (/llms.txt).
   const candidates: string[] = [];
-
-  const cleanHost = parsed.hostname.replace(/^www\./i, '');
-  if (!cleanHost.toLowerCase().startsWith('docs.') && cleanHost.includes('.')) {
-    candidates.push(`${parsed.protocol}//docs.${cleanHost}/llms.txt`);
-  }
 
   const basePath = parsed.pathname.replace(/\/+$/, '');
   if (basePath) {
     candidates.push(`${parsed.origin}${basePath}/llms.txt`);
+  }
+
+  const cleanHost = parsed.hostname.replace(/^www\./i, '');
+  if (!cleanHost.toLowerCase().startsWith('docs.') && cleanHost.includes('.')) {
+    candidates.push(`${parsed.protocol}//docs.${cleanHost}/llms.txt`);
   }
 
   candidates.push(`${parsed.origin}/llms.txt`);

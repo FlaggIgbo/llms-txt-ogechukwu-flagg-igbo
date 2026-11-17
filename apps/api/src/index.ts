@@ -75,6 +75,20 @@ export function startApiServer(port: number = PORT): void {
           return;
         }
 
+        // Direct legacy / stale plaid.com_docs storage requests to official Plaid docs
+        if (relPath.startsWith('plaid.com_docs/')) {
+          const subPath = relPath.slice('plaid.com_docs/'.length);
+          const target = subPath === 'llms-full.txt'
+            ? 'https://plaid.com/docs/llms-full.txt'
+            : 'https://plaid.com/docs/llms.txt';
+          res.writeHead(301, {
+            Location: target,
+            'Access-Control-Allow-Origin': '*',
+          });
+          res.end();
+          return;
+        }
+
         // If Cloudflare R2 / MinIO / S3 is configured with a public CDN, redirect
         const isMinio = (process.env.STORAGE_PROVIDER || 'minio').trim().toLowerCase() === 'minio';
         const s3Base = isMinio

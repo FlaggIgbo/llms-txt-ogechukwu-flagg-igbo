@@ -79,6 +79,13 @@ export const ENSURE_SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_background_jobs_queue ON background_jobs (status, created_at) WHERE status = 'QUEUED';
   CREATE INDEX IF NOT EXISTS idx_background_jobs_dlq ON background_jobs (status, failed_at) WHERE status = 'DEAD_LETTER';
+
+  -- Ensure official documentation storage URLs are preserved for known sites
+  UPDATE site_entries
+  SET llms_txt_storage = 'https://plaid.com/docs/llms.txt',
+      llms_full_txt_storage = 'https://plaid.com/docs/llms-full.txt'
+  WHERE (website_url = 'https://plaid.com/docs' OR website_url = 'https://plaid.com/docs/' OR website_name ILIKE '%plaid%')
+    AND (llms_txt_storage ILIKE '%plaid.com_docs%' OR llms_txt_storage IS NULL);
 `;
 
 /**

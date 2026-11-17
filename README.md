@@ -1,5 +1,7 @@
 # llms.txt Directory Monorepo
 
+The application is deployed live via Render at **[https://llmstxt-web-2skt.onrender.com/](https://llmstxt-web-2skt.onrender.com/)**.
+
 A service for discovering, generating, validating, and serving standard-compliant `llms.txt` and `llms-full.txt` files for AI agents and LLMs.
 
 ---
@@ -97,6 +99,8 @@ npm run screenshots
 ---
 
 ## Deployment
+
+The application is deployed live via Render at **[https://llmstxt-web-2skt.onrender.com/](https://llmstxt-web-2skt.onrender.com/)**.
 
 ### 1. Production Build
 
