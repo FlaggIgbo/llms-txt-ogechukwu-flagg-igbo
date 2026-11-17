@@ -7,6 +7,9 @@
 // Schema initialization & migrations
 // ==========================================
 
+/**
+ * Ensures required database schema: enums, tables, and partial indexes exist on startup.
+ */
 export const ENSURE_SCHEMA_SQL = `
   DO $$
   BEGIN
@@ -78,6 +81,11 @@ export const ENSURE_SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_background_jobs_dlq ON background_jobs (status, failed_at) WHERE status = 'DEAD_LETTER';
 `;
 
+/**
+ * Inserts default seed rows into site_entries, updating fields if the ID already exists.
+ * Params: $1: id, $2: website_name, $3: website_url, $4: short_desc, $5: is_updated,
+ *         $6: llms_txt, $7: llms_full_txt, $8: status, $9: created_at, $10: updated_at
+ */
 export const UPSERT_SEED_ENTRY_SQL = `
   INSERT INTO site_entries (
     id, website_name, website_url, website_short_description,
@@ -94,6 +102,10 @@ export const UPSERT_SEED_ENTRY_SQL = `
     updated_at = EXCLUDED.updated_at
 `;
 
+/**
+ * Startup recovery: deletes duplicate unconfirmed entries, recovers stuck PROCESSING
+ * records back to PENDING/QUEUED, and backfills missing background jobs.
+ */
 export const RECOVER_STUCK_PROCESSING_SQL = `
   DELETE FROM site_entries a USING site_entries b
   WHERE a.created_at > b.created_at
@@ -116,9 +128,16 @@ export const RECOVER_STUCK_PROCESSING_SQL = `
 // Site Entries queries
 // ==========================================
 
+/**
+ * Selects all directory entries ordered by most recently updated.
+ */
 export const SELECT_ALL_ENTRIES_SQL =
   'SELECT id, website_name, website_url, website_short_description, is_updated_latest, llms_txt_storage, llms_full_txt_storage, status, error_message, error_code, is_scheduled_update, created_at, updated_at FROM site_entries ORDER BY updated_at DESC';
 
+/**
+ * Full-text search with relevance ranking (ts_rank) and pagination over name, description, and URL.
+ * Params: $1: search_query, $2: limit, $3: offset
+ */
 export const SEARCH_ENTRIES_FTS_SQL = `
   SELECT id, website_name, website_url, website_short_description,
          is_updated_latest, llms_txt_storage, llms_full_txt_storage,
@@ -137,8 +156,16 @@ export const SEARCH_ENTRIES_FTS_SQL = `
   LIMIT $2 OFFSET $3
 `;
 
+/**
+ * Selects a single directory entry by UUID primary key.
+ * Params: $1: entry_id
+ */
 export const SELECT_ENTRY_BY_ID_SQL = 'SELECT * FROM site_entries WHERE id = $1';
 
+/**
+ * Selects an entry by normalized website URL, prioritizing COMPLETED status over in-progress entries.
+ * Params: $1: normalized_website_url
+ */
 export const SELECT_ENTRY_BY_URL_SQL = `
   SELECT * FROM site_entries 
   WHERE lower(rtrim(website_url, '/')) = $1 
@@ -146,18 +173,32 @@ export const SELECT_ENTRY_BY_URL_SQL = `
   LIMIT 1
 `;
 
+/**
+ * Inserts a new directory entry and returns the inserted row.
+ * Params: $1: name, $2: url, $3: description, $4: llms_txt_storage, $5: llms_full_txt_storage
+ */
 export const INSERT_ENTRY_SQL = `
   INSERT INTO site_entries (website_name, website_url, website_short_description, llms_txt_storage, llms_full_txt_storage)
   VALUES ($1, $2, $3, $4, $5)
   RETURNING *
 `;
 
+/**
+ * Builds dynamic parameterized UPDATE query for partial entry updates.
+ */
 export function buildUpdateEntrySql(sets: string[], idParamIndex: number): string {
   return `UPDATE site_entries SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${idParamIndex} RETURNING *`;
 }
 
+/**
+ * Finds all entries where is_updated_latest is false (pending cadence refresh).
+ */
 export const SELECT_STALE_ENTRIES_SQL = 'SELECT * FROM site_entries WHERE is_updated_latest = false';
 
+/**
+ * Records a user submission that failed validation or conflict checks with FAILED status and error tags.
+ * Params: $1: name, $2: url, $3: description, $4: llms_txt, $5: llms_full_txt, $6: error_msg, $7: error_code
+ */
 export const INSERT_DUPLICATE_FAILED_ENTRY_SQL = `
   INSERT INTO site_entries (
     website_name, website_url, website_short_description,
@@ -167,6 +208,10 @@ export const INSERT_DUPLICATE_FAILED_ENTRY_SQL = `
   RETURNING *
 `;
 
+/**
+ * Inserts a newly submitted entry in PENDING status as part of the initial submission transaction.
+ * Params: $1: name, $2: url, $3: description, $4: llms_txt, $5: llms_full_txt
+ */
 export const INSERT_ENTRY_TRANSACTION_SQL = `
   INSERT INTO site_entries (
     website_name, website_url, website_short_description,
@@ -179,14 +224,26 @@ export const INSERT_ENTRY_TRANSACTION_SQL = `
 // Site Cadence queries
 // ==========================================
 
+/**
+ * Selects the cadence tracking row for a site entry.
+ * Params: $1: site_id
+ */
 export const SELECT_CADENCE_BY_SITE_ID_SQL = 'SELECT * FROM site_cadence WHERE site_id = $1';
 
+/**
+ * Inserts an initial cadence schedule row for a newly created entry in the same transaction.
+ * Params: $1: site_id, $2: url, $3: site_category, $4: check_interval_hours
+ */
 export const INSERT_CADENCE_TRANSACTION_SQL = `
   INSERT INTO site_cadence (site_id, url, site_category, check_interval_hours, next_check_at, status)
   VALUES ($1, $2, $3, $4, NOW() + ($4 || ' hours')::INTERVAL, 'idle')
   RETURNING *
 `;
 
+/**
+ * Atomically claims due cadence rows up to batch limit using SKIP LOCKED to avoid multi-worker race conditions.
+ * Params: $1: batch_limit
+ */
 export const CLAIM_DUE_CADENCE_SITES_SQL = `
   UPDATE site_cadence
   SET status = 'queued'
@@ -201,6 +258,11 @@ export const CLAIM_DUE_CADENCE_SITES_SQL = `
   RETURNING *;
 `;
 
+/**
+ * Updates cadence parameters, HTTP caching headers (ETag, Last-Modified), and next check time after a probe.
+ * Params: $1: interval_hours, $2: streak, $3: etag, $4: last_modified, $5: content_hash,
+ *         $6: site_category, $7: next_check_at, $8: site_id
+ */
 export const UPDATE_CADENCE_RESULT_SQL = `
   UPDATE site_cadence
   SET check_interval_hours = $1,
@@ -219,6 +281,10 @@ export const UPDATE_CADENCE_RESULT_SQL = `
 // Background Jobs queries
 // ==========================================
 
+/**
+ * Enqueues a new asynchronous generation task into the background_jobs queue table.
+ * Params: $1: entry_id, $2: website_url, $3: is_scheduled_update, $4: max_attempts
+ */
 export const INSERT_BACKGROUND_JOB_SQL = `
   INSERT INTO background_jobs (
     entry_id, website_url, is_scheduled_update, status, attempts, max_attempts, created_at, updated_at
@@ -226,6 +292,9 @@ export const INSERT_BACKGROUND_JOB_SQL = `
   RETURNING *
 `;
 
+/**
+ * Atomically claims the oldest QUEUED background job using SKIP LOCKED and transitions it to PROCESSING.
+ */
 export const CLAIM_NEXT_BACKGROUND_JOB_SQL = `
   UPDATE background_jobs
   SET status = 'PROCESSING',
@@ -241,6 +310,10 @@ export const CLAIM_NEXT_BACKGROUND_JOB_SQL = `
   RETURNING *;
 `;
 
+/**
+ * Marks a completed background job.
+ * Params: $1: job_id
+ */
 export const COMPLETE_BACKGROUND_JOB_SQL = `
   UPDATE background_jobs
   SET status = 'COMPLETED',
@@ -248,8 +321,16 @@ export const COMPLETE_BACKGROUND_JOB_SQL = `
   WHERE id = $1
 `;
 
+/**
+ * Retrieves current and max attempts for a background job.
+ * Params: $1: job_id
+ */
 export const SELECT_JOB_ATTEMPTS_SQL = 'SELECT attempts, max_attempts FROM background_jobs WHERE id = $1';
 
+/**
+ * Moves an exhausted job to DEAD_LETTER (DLQ) after exceeding max_attempts.
+ * Params: $1: job_id, $2: error_message, $3: attempts
+ */
 export const FAIL_JOB_DEAD_LETTER_SQL = `
   UPDATE background_jobs
   SET status = 'DEAD_LETTER',
@@ -261,6 +342,10 @@ export const FAIL_JOB_DEAD_LETTER_SQL = `
   RETURNING *
 `;
 
+/**
+ * Re-queues a failed job for retry when attempts < max_attempts.
+ * Params: $1: job_id, $2: error_message, $3: attempts
+ */
 export const FAIL_JOB_RETRY_SQL = `
   UPDATE background_jobs
   SET status = 'QUEUED',
@@ -271,19 +356,37 @@ export const FAIL_JOB_RETRY_SQL = `
   RETURNING *
 `;
 
+/**
+ * Retrieves all jobs in the Dead Letter Queue ordered by most recently failed.
+ */
 export const SELECT_DEAD_LETTER_JOBS_SQL =
   "SELECT * FROM background_jobs WHERE status = 'DEAD_LETTER' ORDER BY failed_at DESC";
 
+/**
+ * Selects background jobs filtered by status.
+ * Params: $1: status
+ */
 export const SELECT_BACKGROUND_JOBS_BY_STATUS_SQL =
   'SELECT * FROM background_jobs WHERE status = $1 ORDER BY created_at DESC';
 
+/**
+ * Selects all background jobs ordered by creation time.
+ */
 export const SELECT_ALL_BACKGROUND_JOBS_SQL = 'SELECT * FROM background_jobs ORDER BY created_at DESC';
 
+/**
+ * Resets any active/processing jobs back to QUEUED when bouncing the queue.
+ */
 export const RESET_PROCESSING_JOBS_SQL =
   "UPDATE background_jobs SET status = 'QUEUED', updated_at = NOW() WHERE status = 'PROCESSING'";
 
+/**
+ * Purges all dead letter queue jobs permanently.
+ */
 export const DELETE_DEAD_LETTER_JOBS_SQL = "DELETE FROM background_jobs WHERE status = 'DEAD_LETTER'";
 
+/**
+ * Re-enqueues all dead letter queue jobs for reprocessing, clearing errors and resetting attempt counters.
+ */
 export const REPROCESS_DEAD_LETTER_JOBS_SQL =
   "UPDATE background_jobs SET status = 'QUEUED', attempts = 0, last_error = null, failed_at = null, updated_at = NOW() WHERE status = 'DEAD_LETTER' RETURNING id";
-
