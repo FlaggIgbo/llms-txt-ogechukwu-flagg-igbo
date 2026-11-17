@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { SiteEntry } from '@llmstxt/shared-types';
+import { type SiteEntry, EntryStatus } from '@llmstxt/shared-types';
 import { SearchBar } from './components/SearchBar';
 import { DirectoryCard } from './components/DirectoryCard';
 import { DirectoryTable } from './components/DirectoryTable';
@@ -16,7 +16,7 @@ const sampleCardStandard: SiteEntry = {
   is_updated_latest: true,
   llms_txt_storage: 'https://fastapi.tiangolo.com/llms.txt',
   llms_full_txt_storage: 'https://fastapi.tiangolo.com/llms-full.txt',
-  status: 'COMPLETED',
+  status: EntryStatus.COMPLETED,
   created_at: '2026-11-01T10:00:00.000Z',
   updated_at: '2026-11-14T14:22:10.000Z',
 };
@@ -29,7 +29,7 @@ const sampleCardMinimal: SiteEntry = {
   is_updated_latest: false,
   llms_txt_storage: 'https://llmstxt.org/llms.txt',
   llms_full_txt_storage: null,
-  status: 'COMPLETED',
+  status: EntryStatus.COMPLETED,
   created_at: '2026-10-15T08:30:00.000Z',
   updated_at: '2026-11-12T18:45:00.000Z',
 };

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { SiteEntry, CreateSiteEntryRequest } from '@llmstxt/shared-types';
+import { type SiteEntry, type CreateSiteEntryRequest, EntryStatus } from '@llmstxt/shared-types';
 
 // State and actions returned by useEntries.
 export interface UseEntriesResult {
@@ -21,7 +21,7 @@ export const MOCK_SEED_ENTRIES: SiteEntry[] = [
     is_updated_latest: true,
     llms_txt_storage: 'https://fastapi.tiangolo.com/llms.txt',
     llms_full_txt_storage: 'https://fastapi.tiangolo.com/llms-full.txt',
-    status: 'COMPLETED',
+    status: EntryStatus.COMPLETED,
     created_at: '2026-11-01T10:00:00.000Z',
     updated_at: '2026-11-14T14:22:10.000Z',
   },
@@ -33,7 +33,7 @@ export const MOCK_SEED_ENTRIES: SiteEntry[] = [
     is_updated_latest: true,
     llms_txt_storage: 'https://docs.anthropic.com/llms.txt',
     llms_full_txt_storage: 'https://docs.anthropic.com/llms-full.txt',
-    status: 'COMPLETED',
+    status: EntryStatus.COMPLETED,
     created_at: '2026-11-02T12:00:00.000Z',
     updated_at: '2026-11-15T09:15:30.000Z',
   },
@@ -45,7 +45,7 @@ export const MOCK_SEED_ENTRIES: SiteEntry[] = [
     is_updated_latest: true,
     llms_txt_storage: 'https://llmstxt.org/llms.txt',
     llms_full_txt_storage: null,
-    status: 'COMPLETED',
+    status: EntryStatus.COMPLETED,
     created_at: '2026-10-15T08:30:00.000Z',
     updated_at: '2026-11-12T18:45:00.000Z',
   },
@@ -57,7 +57,7 @@ export const MOCK_SEED_ENTRIES: SiteEntry[] = [
     is_updated_latest: true,
     llms_txt_storage: 'https://huggingface.co/llms.txt',
     llms_full_txt_storage: 'https://huggingface.co/llms-full.txt',
-    status: 'COMPLETED',
+    status: EntryStatus.COMPLETED,
     created_at: '2026-11-05T16:20:00.000Z',
     updated_at: '2026-11-15T19:00:00.000Z',
   },

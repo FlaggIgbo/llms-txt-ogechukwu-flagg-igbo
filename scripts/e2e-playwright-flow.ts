@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { createServer, type ViteDevServer } from 'vite';
+import { EntryStatus } from '../packages/shared-types/index.js';
 
 // Detect whether running against a remote production environment or local dev
 const targetArg = process.argv.find((arg) => arg.startsWith('http://') || arg.startsWith('https://'));
@@ -241,7 +242,7 @@ async function main() {
       if (!isRemote) {
         const { db } = await import('../packages/database/index.js');
         const entry = await db.getEntryByUrl('https://developer.mozilla.org');
-        if (entry && entry.status === 'COMPLETED') {
+        if (entry && entry.status === EntryStatus.COMPLETED) {
           console.log(`   🎉 developer.mozilla.org COMPLETED!`);
           mdnCompleted = true;
           break;
@@ -307,7 +308,7 @@ async function main() {
       if (!isRemote) {
         const { db } = await import('../packages/database/index.js');
         const entry = await db.getEntryByUrl('https://plaid.com/docs');
-        if (entry && entry.status === 'COMPLETED') {
+        if (entry && entry.status === EntryStatus.COMPLETED) {
           console.log(`   🎉 plaid.com/docs COMPLETED!`);
           break;
         }

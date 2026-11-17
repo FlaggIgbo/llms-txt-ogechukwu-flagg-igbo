@@ -6,6 +6,7 @@ import {
   type BackgroundJob,
   type GenerateJobPayload,
   type JobStatus,
+  EntryStatus,
   EntryErrorCode,
   EntryErrorMessage,
 } from '@llmstxt/shared-types';
@@ -64,7 +65,7 @@ export const MOCK_SEED_ENTRIES: SiteEntry[] = [
     is_updated_latest: true,
     llms_txt_storage: 'https://fastapi.tiangolo.com/llms.txt',
     llms_full_txt_storage: 'https://fastapi.tiangolo.com/llms-full.txt',
-    status: 'COMPLETED',
+    status: EntryStatus.COMPLETED,
     created_at: '2026-11-01T10:00:00.000Z',
     updated_at: '2026-11-14T14:22:10.000Z',
   },
@@ -76,7 +77,7 @@ export const MOCK_SEED_ENTRIES: SiteEntry[] = [
     is_updated_latest: true,
     llms_txt_storage: 'https://docs.anthropic.com/llms.txt',
     llms_full_txt_storage: 'https://docs.anthropic.com/llms-full.txt',
-    status: 'COMPLETED',
+    status: EntryStatus.COMPLETED,
     created_at: '2026-11-02T12:00:00.000Z',
     updated_at: '2026-11-15T09:15:30.000Z',
   },
@@ -88,7 +89,7 @@ export const MOCK_SEED_ENTRIES: SiteEntry[] = [
     is_updated_latest: true,
     llms_txt_storage: 'https://llmstxt.org/llms.txt',
     llms_full_txt_storage: null,
-    status: 'COMPLETED',
+    status: EntryStatus.COMPLETED,
     created_at: '2026-10-15T08:30:00.000Z',
     updated_at: '2026-11-12T18:45:00.000Z',
   },
@@ -100,7 +101,7 @@ export const MOCK_SEED_ENTRIES: SiteEntry[] = [
     is_updated_latest: true,
     llms_txt_storage: 'https://huggingface.co/llms.txt',
     llms_full_txt_storage: 'https://huggingface.co/llms-full.txt',
-    status: 'COMPLETED',
+    status: EntryStatus.COMPLETED,
     created_at: '2026-11-05T16:20:00.000Z',
     updated_at: '2026-11-15T19:00:00.000Z',
   },
@@ -558,7 +559,7 @@ export class DatabaseClient {
 
     // Check if the URL already exists in our site_entries table.
     const existing = await this.getEntryByUrl(input.website_url);
-    if (existing && existing.status === 'COMPLETED') {
+    if (existing && existing.status === EntryStatus.COMPLETED) {
       const duplicateError = EntryErrorMessage.DUPLICATE_URL;
       const id = `00000000-0000-0000-0000-${Date.now().toString().slice(-12).padStart(12, '0')}`;
       const duplicateEntry: SiteEntry = {
@@ -570,7 +571,7 @@ export class DatabaseClient {
         llms_txt_storage: llmsTxt || existing.llms_txt_storage,
         llms_full_txt_storage: llmsFullTxt || existing.llms_full_txt_storage,
         llm_txt: llmsTxt || existing.llm_txt,
-        status: 'FAILED',
+        status: EntryStatus.FAILED,
         error_message: duplicateError,
         error_code: EntryErrorCode.DUPLICATE_URL,
         is_scheduled_update: false,
@@ -664,7 +665,7 @@ export class DatabaseClient {
           llms_txt_storage: llmsTxt,
           llms_full_txt_storage: llmsFullTxt,
           llm_txt: llmsTxt,
-          status: 'PENDING',
+          status: EntryStatus.PENDING,
           error_message: null,
           is_scheduled_update: false,
           created_at: new Date().toISOString(),

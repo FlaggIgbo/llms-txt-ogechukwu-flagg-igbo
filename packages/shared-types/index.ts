@@ -1,5 +1,10 @@
 // Possible states of a site entry.
-export type EntryStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+export enum EntryStatus {
+  PENDING = 'PENDING',
+  PROCESSING = 'PROCESSING',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+}
 
 // Canonical error codes for site entries.
 export enum EntryErrorCode {

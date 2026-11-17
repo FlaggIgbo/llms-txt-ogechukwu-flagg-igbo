@@ -11,6 +11,7 @@ import {
   type PostEntryResponseMessage,
   type TypedApiRequest,
   type TypedApiResponse,
+  EntryStatus,
   ApiErrorCode,
   ApiErrorMessage,
 } from '@llmstxt/shared-types';
@@ -94,16 +95,16 @@ export async function handleGetEntries(
 
     if (!statusParam) {
       // Default: only return completed / confirmed entries for the home page.
-      entries = entries.filter((entry) => entry.status === 'COMPLETED');
+      entries = entries.filter((entry) => entry.status === EntryStatus.COMPLETED);
     } else if (statusParam.toLowerCase() === 'pending' || statusParam.toLowerCase() === 'updating') {
       // Updates page: return entries in progress (PENDING, PROCESSING),
       // and user-submitted entries that failed (to show an error next to them).
       // Entries updated from the cron scheduler that failed are excluded.
       entries = entries.filter((entry) => {
-        if (entry.status === 'PENDING' || entry.status === 'PROCESSING') {
+        if (entry.status === EntryStatus.PENDING || entry.status === EntryStatus.PROCESSING) {
           return true;
         }
-        if (entry.status === 'FAILED' && !entry.is_scheduled_update) {
+        if (entry.status === EntryStatus.FAILED && !entry.is_scheduled_update) {
           return true;
         }
         return false;
@@ -165,7 +166,7 @@ export async function handlePostEntry(
     const { entry } = await db.createEntryWithCadence(body);
 
     // Queue background generation job only if not already failed (e.g. duplicate URL).
-    if (entry.status !== 'FAILED') {
+    if (entry.status !== EntryStatus.FAILED) {
       await generationQueue.enqueueGenerateJob({
         entryId: entry.id,
         websiteUrl: entry.website_url,

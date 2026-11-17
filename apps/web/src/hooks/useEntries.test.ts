@@ -23,7 +23,7 @@ import { db } from '@llmstxt/database';
 import { HomePage } from '../pages/HomePage.js';
 import { AddEntryPage } from '../pages/AddEntryPage.js';
 import { UpdatesPage } from '../pages/UpdatesPage.js';
-import { EntryErrorCode, EntryErrorMessage } from '@llmstxt/shared-types';
+import { EntryStatus, EntryErrorCode, EntryErrorMessage } from '@llmstxt/shared-types';
 import { App } from '../App.js';
 
 describe('useEntries and MOCK_SEED_ENTRIES', () => {
@@ -40,7 +40,7 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
         assert.ok(entry.website_name, `Entry ${entry.id} should have website_name`);
         assert.ok(entry.website_url.startsWith('https://'), `Entry ${entry.id} should have a valid https URL`);
         assert.ok(entry.website_short_description, `Entry ${entry.id} should have a description`);
-        assert.equal(entry.status, 'COMPLETED');
+        assert.equal(entry.status, EntryStatus.COMPLETED);
         assert.ok(entry.created_at, `Entry ${entry.id} should have created_at`);
         assert.ok(entry.updated_at, `Entry ${entry.id} should have updated_at`);
       }
@@ -241,7 +241,7 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
         id: 'updating-1',
         website_name: 'Queued Website',
         website_url: 'https://queued.example.com',
-        status: 'PENDING' as const,
+        status: EntryStatus.PENDING,
         is_updated_latest: false,
       };
 
@@ -263,7 +263,7 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
         id: 'failed-user-1',
         website_name: 'Failed Site',
         website_url: 'https://failed.example.com',
-        status: 'FAILED' as const,
+        status: EntryStatus.FAILED,
         error_message: 'Failed to crawl website: HTTP 404',
         is_scheduled_update: false,
       };
@@ -289,7 +289,7 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
         id: 'dup-1',
         website_name: 'FastAPI Clone',
         website_url: 'https://fastapi.tiangolo.com',
-        status: 'FAILED' as const,
+        status: EntryStatus.FAILED,
         error_code: EntryErrorCode.DUPLICATE_URL,
         error_message: EntryErrorMessage.DUPLICATE_URL,
         is_scheduled_update: false,
@@ -317,7 +317,7 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
         id: 'failed-cron-1',
         website_name: 'Cron Failed Site',
         website_url: 'https://cron-failed.example.com',
-        status: 'FAILED' as const,
+        status: EntryStatus.FAILED,
         error_message: 'Probe timeout',
         is_scheduled_update: true,
       };
@@ -393,7 +393,7 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
         website_name: 'FastAPI Clone',
       });
 
-      assert.equal(result.entry.status, 'FAILED');
+      assert.equal(result.entry.status, EntryStatus.FAILED);
       assert.equal(result.entry.is_scheduled_update, false);
       assert.equal(result.entry.error_code, EntryErrorCode.DUPLICATE_URL);
       assert.equal(result.entry.error_message, EntryErrorMessage.DUPLICATE_URL);

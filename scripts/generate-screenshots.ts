@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type Page } from 'playwright';
 import { createServer, type ViteDevServer } from 'vite';
+import { EntryStatus } from '../packages/shared-types/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,7 +22,7 @@ const MOCK_ENTRIES = [
     is_updated_latest: true,
     llms_txt_storage: 'https://fastapi.tiangolo.com/llms.txt',
     llms_full_txt_storage: 'https://fastapi.tiangolo.com/llms-full.txt',
-    status: 'COMPLETED',
+    status: EntryStatus.COMPLETED,
     created_at: '2026-11-01T10:00:00.000Z',
     updated_at: '2026-11-14T14:22:10.000Z',
   },
@@ -33,7 +34,7 @@ const MOCK_ENTRIES = [
     is_updated_latest: true,
     llms_txt_storage: 'https://docs.anthropic.com/llms.txt',
     llms_full_txt_storage: 'https://docs.anthropic.com/llms-full.txt',
-    status: 'COMPLETED',
+    status: EntryStatus.COMPLETED,
     created_at: '2026-11-02T12:00:00.000Z',
     updated_at: '2026-11-15T09:15:30.000Z',
   },
@@ -45,7 +46,7 @@ const MOCK_ENTRIES = [
     is_updated_latest: true,
     llms_txt_storage: 'https://llmstxt.org/llms.txt',
     llms_full_txt_storage: null,
-    status: 'COMPLETED',
+    status: EntryStatus.COMPLETED,
     created_at: '2026-10-15T08:30:00.000Z',
     updated_at: '2026-11-12T18:45:00.000Z',
   },
@@ -57,7 +58,7 @@ const MOCK_ENTRIES = [
     is_updated_latest: true,
     llms_txt_storage: 'https://huggingface.co/llms.txt',
     llms_full_txt_storage: 'https://huggingface.co/llms-full.txt',
-    status: 'COMPLETED',
+    status: EntryStatus.COMPLETED,
     created_at: '2026-11-05T16:20:00.000Z',
     updated_at: '2026-11-15T19:00:00.000Z',
   },
@@ -72,7 +73,7 @@ const MOCK_UPDATING_ENTRIES = [
     is_updated_latest: false,
     llms_txt_storage: 'https://supabase.com/docs/llms.txt',
     llms_full_txt_storage: null,
-    status: 'PROCESSING',
+    status: EntryStatus.PROCESSING,
     created_at: '2026-11-16T18:00:00.000Z',
     updated_at: '2026-11-16T18:05:00.000Z',
   },
@@ -84,7 +85,7 @@ const MOCK_UPDATING_ENTRIES = [
     is_updated_latest: false,
     llms_txt_storage: null,
     llms_full_txt_storage: null,
-    status: 'PENDING',
+    status: EntryStatus.PENDING,
     created_at: '2026-11-16T18:10:00.000Z',
     updated_at: '2026-11-16T18:10:00.000Z',
   },
@@ -96,7 +97,7 @@ const MOCK_UPDATING_ENTRIES = [
     is_updated_latest: false,
     llms_txt_storage: null,
     llms_full_txt_storage: null,
-    status: 'FAILED',
+    status: EntryStatus.FAILED,
     error_message: 'Failed to fetch /llms.txt: 404 Not Found',
     created_at: '2026-11-16T17:50:00.000Z',
     updated_at: '2026-11-16T17:52:00.000Z',
@@ -109,7 +110,7 @@ const MOCK_UPDATING_ENTRIES = [
     is_updated_latest: false,
     llms_txt_storage: null,
     llms_full_txt_storage: null,
-    status: 'FAILED',
+    status: EntryStatus.FAILED,
     error_message: 'Website URL already exists in site_entries table',
     created_at: '2026-11-16T17:40:00.000Z',
     updated_at: '2026-11-16T17:42:00.000Z',

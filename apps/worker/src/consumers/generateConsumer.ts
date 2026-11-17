@@ -3,6 +3,7 @@ import { generationQueue, type DeadLetterJob } from '@llmstxt/queue';
 import { logError } from '@llmstxt/logger';
 import {
   type GenerateJobPayload,
+  EntryStatus,
   EntryErrorCode,
   EntryErrorMessage,
 } from '@llmstxt/shared-types';
@@ -23,9 +24,9 @@ export async function handleGenerateJob(payload: GenerateJobPayload): Promise<vo
   try {
     // Check if the URL already exists in site_entries under another entry ID.
     const existing = await db.getEntryByUrl(websiteUrl);
-    if (existing && existing.id !== entryId && existing.status === 'COMPLETED') {
+    if (existing && existing.id !== entryId && existing.status === EntryStatus.COMPLETED) {
       await db.updateEntry(entryId, {
-        status: 'FAILED',
+        status: EntryStatus.FAILED,
         error_message: EntryErrorMessage.DUPLICATE_URL,
         error_code: EntryErrorCode.DUPLICATE_URL,
         is_scheduled_update: false,
@@ -35,7 +36,7 @@ export async function handleGenerateJob(payload: GenerateJobPayload): Promise<vo
 
     // Mark entry as processing and track whether it was triggered by cron.
     await db.updateEntry(entryId, {
-      status: 'PROCESSING',
+      status: EntryStatus.PROCESSING,
       is_scheduled_update: Boolean(isScheduledUpdate),
     });
 
@@ -68,7 +69,7 @@ export async function handleGenerateJob(payload: GenerateJobPayload): Promise<vo
           contentHash: probe.contentHash,
         });
 
-        await db.updateEntry(entryId, { status: 'COMPLETED', is_updated_latest: true });
+        await db.updateEntry(entryId, { status: EntryStatus.COMPLETED, is_updated_latest: true });
         return;
       }
     }
@@ -97,7 +98,7 @@ export async function handleGenerateJob(payload: GenerateJobPayload): Promise<vo
       is_updated_latest: true,
       llms_txt_storage: uploaded.llmsTxtUri,
       llms_full_txt_storage: uploaded.llmsFullTxtUri,
-      status: 'COMPLETED',
+      status: EntryStatus.COMPLETED,
       error_message: null,
       is_scheduled_update: false,
     });
@@ -136,7 +137,7 @@ export async function handleDeadLetterJob(dlqJob: DeadLetterJob): Promise<void> 
     // Cron-scheduled update failed: remove from the frontend "updates" queue.
     // Revert entry status back to COMPLETED so existing directory entry remains active.
     await db.updateEntry(entryId, {
-      status: 'COMPLETED',
+      status: EntryStatus.COMPLETED,
       is_updated_latest: true,
       error_message: null,
       is_scheduled_update: true,
@@ -144,7 +145,7 @@ export async function handleDeadLetterJob(dlqJob: DeadLetterJob): Promise<void> 
   } else {
     // User-submitted entry failed: mark as FAILED with error message to show on updates page.
     await db.updateEntry(entryId, {
-      status: 'FAILED',
+      status: EntryStatus.FAILED,
       error_message: dlqJob.error || EntryErrorMessage.GENERATION_FAILED,
       error_code: dlqJob.error ? EntryErrorCode.CRAWL_FAILED : EntryErrorCode.GENERATION_FAILED,
       is_scheduled_update: false,

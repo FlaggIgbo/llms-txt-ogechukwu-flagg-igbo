@@ -1,5 +1,10 @@
 import React from 'react';
-import { type SiteEntry, EntryErrorCode, EntryErrorMessage } from '@llmstxt/shared-types';
+import {
+  type SiteEntry,
+  EntryStatus,
+  EntryErrorCode,
+  EntryErrorMessage,
+} from '@llmstxt/shared-types';
 import { resolveLlmTxtUrl, formatDateTime } from '../components/DirectoryTable';
 
 // Props for the updates page.
@@ -13,7 +18,7 @@ export interface UpdatesPageProps {
 
 // Render status badge for an updating entry.
 function renderStatusBadge(entry: SiteEntry) {
-  if (entry.status === 'PROCESSING') {
+  if (entry.status === EntryStatus.PROCESSING) {
     return (
       <span className="status-badge status-processing">
         <span className="status-pulse" />
@@ -22,11 +27,11 @@ function renderStatusBadge(entry: SiteEntry) {
     );
   }
 
-  if (entry.status === 'PENDING') {
+  if (entry.status === EntryStatus.PENDING) {
     return <span className="status-badge status-pending">Queued</span>;
   }
 
-  if (entry.status === 'FAILED') {
+  if (entry.status === EntryStatus.FAILED) {
     return (
       <span className="status-badge status-failed" title={entry.error_message || 'Processing failed'}>
         <span className="status-failed-icon">✕</span>
@@ -49,10 +54,14 @@ export function UpdatesPage({
   // Filter for entries that are currently updating or failed user submissions.
   // Exclude cron-scheduled entries that failed (they are removed from the frontend queue).
   const updatingEntries = entries.filter((entry) => {
-    if (entry.status === 'FAILED' && entry.is_scheduled_update) {
+    if (entry.status === EntryStatus.FAILED && entry.is_scheduled_update) {
       return false;
     }
-    return entry.status === 'PENDING' || entry.status === 'PROCESSING' || entry.status === 'FAILED';
+    return (
+      entry.status === EntryStatus.PENDING ||
+      entry.status === EntryStatus.PROCESSING ||
+      entry.status === EntryStatus.FAILED
+    );
   });
 
   return (
@@ -132,7 +141,7 @@ export function UpdatesPage({
                     <td className="cell-status">
                       <div className="status-cell-wrapper">
                         {renderStatusBadge(entry)}
-                        {entry.status === 'FAILED' &&
+                        {entry.status === EntryStatus.FAILED &&
                           (entry.error_code === EntryErrorCode.DUPLICATE_URL ||
                             entry.error_message === EntryErrorMessage.DUPLICATE_URL ||
                             entry.error_message?.toLowerCase().includes('already exists')) && (
