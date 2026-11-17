@@ -11,6 +11,39 @@ import {
   EntryErrorMessage,
 } from '@llmstxt/shared-types';
 import { logWarn } from '@llmstxt/logger';
+import {
+  ENSURE_SCHEMA_SQL,
+  UPSERT_SEED_ENTRY_SQL,
+  RECOVER_STUCK_PROCESSING_SQL,
+  SELECT_ALL_ENTRIES_SQL,
+  SEARCH_ENTRIES_FTS_SQL,
+  SELECT_ENTRY_BY_ID_SQL,
+  SELECT_ENTRY_BY_URL_SQL,
+  INSERT_ENTRY_SQL,
+  buildUpdateEntrySql,
+  SELECT_STALE_ENTRIES_SQL,
+  INSERT_DUPLICATE_FAILED_ENTRY_SQL,
+  INSERT_ENTRY_TRANSACTION_SQL,
+  SELECT_CADENCE_BY_SITE_ID_SQL,
+  INSERT_CADENCE_TRANSACTION_SQL,
+  CLAIM_DUE_CADENCE_SITES_SQL,
+  UPDATE_CADENCE_RESULT_SQL,
+  INSERT_BACKGROUND_JOB_SQL,
+  CLAIM_NEXT_BACKGROUND_JOB_SQL,
+  COMPLETE_BACKGROUND_JOB_SQL,
+  SELECT_JOB_ATTEMPTS_SQL,
+  FAIL_JOB_DEAD_LETTER_SQL,
+  FAIL_JOB_RETRY_SQL,
+  SELECT_DEAD_LETTER_JOBS_SQL,
+  SELECT_BACKGROUND_JOBS_BY_STATUS_SQL,
+  SELECT_ALL_BACKGROUND_JOBS_SQL,
+  RESET_PROCESSING_JOBS_SQL,
+  DELETE_DEAD_LETTER_JOBS_SQL,
+  REPROCESS_DEAD_LETTER_JOBS_SQL,
+  UPSERT_STORAGE_FILE_SQL,
+  SELECT_STORAGE_FILE_SQL,
+  LIST_STORAGE_FILES_SQL,
+} from './queries.js';
 
 // Database connection URL.
 const connectionString =
@@ -183,135 +216,25 @@ export class DatabaseClient {
     if (this.hasEnsuredSeed) return;
     try {
       const pool = this.getPool();
-      await pool
-        .query(
-          `DO $$
-           BEGIN
-             IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'entry_status') THEN
-               CREATE TYPE entry_status AS ENUM ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED');
-             END IF;
-           END $$;
-
-           CREATE TABLE IF NOT EXISTS site_entries (
-             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-             website_name TEXT NOT NULL DEFAULT '',
-             website_url TEXT NOT NULL,
-             website_short_description TEXT NOT NULL DEFAULT '',
-             is_updated_latest BOOLEAN NOT NULL DEFAULT FALSE,
-             llms_txt_storage TEXT,
-             llms_full_txt_storage TEXT,
-             status entry_status NOT NULL DEFAULT 'PENDING',
-             error_message TEXT,
-             error_code TEXT,
-             is_scheduled_update BOOLEAN NOT NULL DEFAULT FALSE,
-             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-           );
-
-           ALTER TABLE site_entries ADD COLUMN IF NOT EXISTS error_message TEXT;
-           ALTER TABLE site_entries ADD COLUMN IF NOT EXISTS error_code TEXT;
-           ALTER TABLE site_entries ADD COLUMN IF NOT EXISTS is_scheduled_update BOOLEAN NOT NULL DEFAULT FALSE;
-           ALTER TABLE site_entries DROP CONSTRAINT IF EXISTS site_entries_website_url_key;
-           CREATE UNIQUE INDEX IF NOT EXISTS idx_site_entries_completed_url ON site_entries (website_url) WHERE status = 'COMPLETED';
-
-           CREATE TABLE IF NOT EXISTS site_cadence (
-             site_id UUID PRIMARY KEY REFERENCES site_entries(id) ON DELETE CASCADE,
-             url TEXT NOT NULL,
-             site_category TEXT,
-             check_interval_hours INT NOT NULL DEFAULT 24,
-             unchanged_streak INT NOT NULL DEFAULT 0,
-             etag TEXT,
-             last_modified TEXT,
-             last_content_hash TEXT,
-             last_checked_at TIMESTAMPTZ,
-             next_check_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '24 hours',
-             status TEXT NOT NULL DEFAULT 'idle'
-           );
-
-           CREATE INDEX IF NOT EXISTS idx_site_cadence_due ON site_cadence (next_check_at) WHERE status = 'idle';
-
-           DO $$
-           BEGIN
-             IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'job_status') THEN
-               CREATE TYPE job_status AS ENUM ('QUEUED', 'PROCESSING', 'COMPLETED', 'FAILED', 'DEAD_LETTER');
-             END IF;
-           END $$;
-
-           CREATE TABLE IF NOT EXISTS background_jobs (
-             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-             entry_id UUID NOT NULL REFERENCES site_entries(id) ON DELETE CASCADE,
-             website_url TEXT NOT NULL,
-             is_scheduled_update BOOLEAN NOT NULL DEFAULT FALSE,
-             status job_status NOT NULL DEFAULT 'QUEUED',
-             attempts INT NOT NULL DEFAULT 0,
-             max_attempts INT NOT NULL DEFAULT 3,
-             last_error TEXT,
-             failed_at TIMESTAMPTZ,
-             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-           );
-
-           CREATE INDEX IF NOT EXISTS idx_background_jobs_queue ON background_jobs (status, created_at) WHERE status = 'QUEUED';
-           CREATE INDEX IF NOT EXISTS idx_background_jobs_dlq ON background_jobs (status, failed_at) WHERE status = 'DEAD_LETTER';
-
-           CREATE TABLE IF NOT EXISTS storage_files (
-             rel_path TEXT PRIMARY KEY,
-             content TEXT NOT NULL,
-             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-           );`
-        )
-        .catch(() => {});
+      await pool.query(ENSURE_SCHEMA_SQL).catch(() => {});
 
       for (const entry of MOCK_SEED_ENTRIES) {
-        await pool.query(
-          `INSERT INTO site_entries (
-            id, website_name, website_url, website_short_description,
-            is_updated_latest, llms_txt_storage, llms_full_txt_storage,
-            status, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-          ON CONFLICT (id) DO UPDATE SET
-            website_name = EXCLUDED.website_name,
-            website_short_description = EXCLUDED.website_short_description,
-            is_updated_latest = EXCLUDED.is_updated_latest,
-            llms_txt_storage = EXCLUDED.llms_txt_storage,
-            llms_full_txt_storage = EXCLUDED.llms_full_txt_storage,
-            status = EXCLUDED.status,
-            updated_at = EXCLUDED.updated_at`,
-          [
-            entry.id,
-            entry.website_name,
-            entry.website_url,
-            entry.website_short_description,
-            entry.is_updated_latest,
-            entry.llms_txt_storage,
-            entry.llms_full_txt_storage,
-            entry.status,
-            entry.created_at,
-            entry.updated_at,
-          ]
-        );
+        await pool.query(UPSERT_SEED_ENTRY_SQL, [
+          entry.id,
+          entry.website_name,
+          entry.website_url,
+          entry.website_short_description,
+          entry.is_updated_latest,
+          entry.llms_txt_storage,
+          entry.llms_full_txt_storage,
+          entry.status,
+          entry.created_at,
+          entry.updated_at,
+        ]);
       }
 
       // Recover any entries or jobs stuck in PROCESSING from a previous restart and backfill orphaned PENDING entries.
-      await pool
-        .query(
-          `DELETE FROM site_entries a USING site_entries b
-           WHERE a.created_at > b.created_at
-             AND a.website_url = b.website_url
-             AND a.status IN ('PENDING', 'PROCESSING')
-             AND b.status IN ('PENDING', 'PROCESSING');
-           UPDATE site_entries SET status = 'PENDING', is_scheduled_update = FALSE, updated_at = NOW() WHERE status = 'PROCESSING';
-           UPDATE background_jobs SET status = 'QUEUED', updated_at = NOW() WHERE status = 'PROCESSING';
-           INSERT INTO background_jobs (entry_id, website_url, is_scheduled_update, status, attempts, max_attempts, created_at, updated_at)
-           SELECT se.id, se.website_url, FALSE, 'QUEUED', 0, 3, NOW(), NOW()
-           FROM site_entries se
-           WHERE se.status = 'PENDING'
-             AND NOT EXISTS (
-               SELECT 1 FROM background_jobs bj
-               WHERE bj.entry_id = se.id AND bj.status IN ('QUEUED', 'PROCESSING')
-             );`
-        )
-        .catch(() => {});
+      await pool.query(RECOVER_STUCK_PROCESSING_SQL).catch(() => {});
 
       this.hasEnsuredSeed = true;
     } catch (err) {
@@ -329,17 +252,14 @@ export class DatabaseClient {
       await this.ensureDevelopmentSeed();
     }
 
-    const selectAllSql =
-      'SELECT id, website_name, website_url, website_short_description, is_updated_latest, llms_txt_storage, llms_full_txt_storage, status, error_message, error_code, is_scheduled_update, created_at, updated_at FROM site_entries ORDER BY updated_at DESC';
-
     try {
       const pool = this.getPool();
-      const result = await pool.query<SiteEntry>(selectAllSql);
+      const result = await pool.query<SiteEntry>(SELECT_ALL_ENTRIES_SQL);
 
       // Seed and retry if table is empty in dev.
       if (result.rows.length === 0 && isDev) {
         await this.ensureDevelopmentSeed();
-        const recheck = await pool.query<SiteEntry>(selectAllSql);
+        const recheck = await pool.query<SiteEntry>(SELECT_ALL_ENTRIES_SQL);
         if (recheck.rows.length > 0) {
           return recheck.rows.map(formatRow);
         }
@@ -382,26 +302,7 @@ export class DatabaseClient {
 
     try {
       const pool = this.getPool();
-      // Search using Postgres full-text search and ILIKE fallback.
-      const sql = `
-        SELECT id, website_name, website_url, website_short_description,
-               is_updated_latest, llms_txt_storage, llms_full_txt_storage,
-               status, created_at, updated_at,
-               ts_rank(
-                 to_tsvector('english', coalesce(website_name, '') || ' ' || coalesce(website_short_description, '') || ' ' || coalesce(website_url, '')),
-                 plainto_tsquery('english', $1)
-               ) as rank,
-               count(*) OVER() AS full_count
-        FROM site_entries
-        WHERE to_tsvector('english', coalesce(website_name, '') || ' ' || coalesce(website_short_description, '') || ' ' || coalesce(website_url, '')) @@ plainto_tsquery('english', $1)
-           OR website_name ILIKE ('%' || $1 || '%')
-           OR website_short_description ILIKE ('%' || $1 || '%')
-           OR website_url ILIKE ('%' || $1 || '%')
-        ORDER BY rank DESC, updated_at DESC
-        LIMIT $2 OFFSET $3
-      `;
-
-      const result = await pool.query(sql, [q, limit, offset]);
+      const result = await pool.query(SEARCH_ENTRIES_FTS_SQL, [q, limit, offset]);
       let total = 0;
       if (result.rows.length > 0) {
         total = Number(result.rows[0].full_count);
@@ -433,7 +334,7 @@ export class DatabaseClient {
   // Find one entry by ID.
   async getEntryById(id: string): Promise<SiteEntry | null> {
     const pool = this.getPool();
-    const result = await pool.query<SiteEntry>('SELECT * FROM site_entries WHERE id = $1', [id]);
+    const result = await pool.query<SiteEntry>(SELECT_ENTRY_BY_ID_SQL, [id]);
     if (result.rows.length === 0) {
       return null;
     }
@@ -451,13 +352,7 @@ export class DatabaseClient {
 
     try {
       const pool = this.getPool();
-      const res = await pool.query<SiteEntry>(
-        `SELECT * FROM site_entries 
-         WHERE lower(rtrim(website_url, '/')) = $1 
-         ORDER BY (status = 'COMPLETED') DESC, created_at DESC
-         LIMIT 1`,
-        [cleanUrl]
-      );
+      const res = await pool.query<SiteEntry>(SELECT_ENTRY_BY_URL_SQL, [cleanUrl]);
       if (res.rows.length === 0) {
         return null;
       }
@@ -480,12 +375,13 @@ export class DatabaseClient {
     const description = input.website_short_description || input.additional_notes || '';
     const llmsTxt = input.llms_txt_storage || input.llms_txt_url || input.llm_txt || null;
     const llmsFullTxt = input.llms_full_txt_storage || input.llms_full_txt_url || null;
-    const result = await pool.query<SiteEntry>(
-      `INSERT INTO site_entries (website_name, website_url, website_short_description, llms_txt_storage, llms_full_txt_storage)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
-      [websiteName, input.website_url, description, llmsTxt, llmsFullTxt]
-    );
+    const result = await pool.query<SiteEntry>(INSERT_ENTRY_SQL, [
+      websiteName,
+      input.website_url,
+      description,
+      llmsTxt,
+      llmsFullTxt,
+    ]);
     return formatRow(result.rows[0]);
   }
 
@@ -508,7 +404,7 @@ export class DatabaseClient {
 
     values.push(id);
     const result = await pool.query<SiteEntry>(
-      `UPDATE site_entries SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${paramIndex} RETURNING *`,
+      buildUpdateEntrySql(sets, paramIndex),
       values
     );
 
@@ -521,9 +417,7 @@ export class DatabaseClient {
   // Get entries that need updating.
   async findStaleEntries(): Promise<SiteEntry[]> {
     const pool = this.getPool();
-    const result = await pool.query<SiteEntry>(
-      'SELECT * FROM site_entries WHERE is_updated_latest = false'
-    );
+    const result = await pool.query<SiteEntry>(SELECT_STALE_ENTRIES_SQL);
     return result.rows.map(formatRow);
   }
 
@@ -532,7 +426,7 @@ export class DatabaseClient {
     const isDev = isDevMode();
     try {
       const pool = this.getPool();
-      const res = await pool.query('SELECT * FROM site_cadence WHERE site_id = $1', [siteId]);
+      const res = await pool.query(SELECT_CADENCE_BY_SITE_ID_SQL, [siteId]);
       if (res.rows.length === 0) {
         return mockCadenceMap.get(siteId) || null;
       }
@@ -599,23 +493,15 @@ export class DatabaseClient {
 
       try {
         const pool = this.getPool();
-        const res = await pool.query<SiteEntry>(
-          `INSERT INTO site_entries (
-             website_name, website_url, website_short_description,
-             llms_txt_storage, llms_full_txt_storage, status, is_updated_latest,
-             error_message, error_code, is_scheduled_update
-           ) VALUES ($1, $2, $3, $4, $5, 'FAILED', FALSE, $6, $7, FALSE)
-           RETURNING *`,
-          [
-            duplicateEntry.website_name,
-            duplicateEntry.website_url,
-            duplicateEntry.website_short_description,
-            duplicateEntry.llms_txt_storage,
-            duplicateEntry.llms_full_txt_storage,
-            duplicateError,
-            EntryErrorCode.DUPLICATE_URL,
-          ]
-        );
+        const res = await pool.query<SiteEntry>(INSERT_DUPLICATE_FAILED_ENTRY_SQL, [
+          duplicateEntry.website_name,
+          duplicateEntry.website_url,
+          duplicateEntry.website_short_description,
+          duplicateEntry.llms_txt_storage,
+          duplicateEntry.llms_full_txt_storage,
+          duplicateError,
+          EntryErrorCode.DUPLICATE_URL,
+        ]);
         return { entry: formatRow(res.rows[0]), cadence: duplicateCadence };
       } catch {
         return { entry: duplicateEntry, cadence: duplicateCadence };
@@ -627,22 +513,21 @@ export class DatabaseClient {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        const entryRes = await client.query(
-          `INSERT INTO site_entries (
-             website_name, website_url, website_short_description,
-             llms_txt_storage, llms_full_txt_storage, status, is_updated_latest
-           ) VALUES ($1, $2, $3, $4, $5, 'PENDING', FALSE)
-           RETURNING *`,
-          [websiteName, input.website_url, description, llmsTxt, llmsFullTxt]
-        );
+        const entryRes = await client.query(INSERT_ENTRY_TRANSACTION_SQL, [
+          websiteName,
+          input.website_url,
+          description,
+          llmsTxt,
+          llmsFullTxt,
+        ]);
         const entry = formatRow(entryRes.rows[0]);
 
-        const cadenceRes = await client.query(
-          `INSERT INTO site_cadence (site_id, url, site_category, check_interval_hours, next_check_at, status)
-           VALUES ($1, $2, $3, $4, NOW() + ($4 || ' hours')::INTERVAL, 'idle')
-           RETURNING *`,
-          [entry.id, entry.website_url, siteCategory, intervalHours]
-        );
+        const cadenceRes = await client.query(INSERT_CADENCE_TRANSACTION_SQL, [
+          entry.id,
+          entry.website_url,
+          siteCategory,
+          intervalHours,
+        ]);
         const cadence = formatCadenceRow(cadenceRes.rows[0]);
 
         await client.query('COMMIT');
@@ -697,20 +582,7 @@ export class DatabaseClient {
     const isDev = isDevMode();
     try {
       const pool = this.getPool();
-      const sql = `
-        UPDATE site_cadence
-        SET status = 'queued'
-        WHERE site_id IN (
-          SELECT sc.site_id FROM site_cadence sc
-          INNER JOIN site_entries se ON se.id = sc.site_id
-          WHERE sc.next_check_at <= NOW() AND sc.status = 'idle' AND se.status = 'COMPLETED'
-          ORDER BY sc.next_check_at ASC
-          LIMIT $1
-          FOR UPDATE SKIP LOCKED
-        )
-        RETURNING *;
-      `;
-      const result = await pool.query(sql, [limit]);
+      const result = await pool.query(CLAIM_DUE_CADENCE_SITES_SQL, [limit]);
       return result.rows.map(formatCadenceRow);
     } catch (err) {
       if (isDev) {
@@ -745,20 +617,7 @@ export class DatabaseClient {
     const isDev = isDevMode();
     try {
       const pool = this.getPool();
-      const sql = `
-        UPDATE site_cadence
-        SET check_interval_hours = $1,
-            unchanged_streak = $2,
-            etag = COALESCE($3, etag),
-            last_modified = COALESCE($4, last_modified),
-            last_content_hash = COALESCE($5, last_content_hash),
-            site_category = COALESCE($6, site_category),
-            last_checked_at = NOW(),
-            next_check_at = $7,
-            status = 'idle'
-        WHERE site_id = $8;
-      `;
-      await pool.query(sql, [
+      await pool.query(UPDATE_CADENCE_RESULT_SQL, [
         result.newIntervalHours,
         result.newStreak,
         result.etag ?? null,
@@ -814,13 +673,12 @@ export class DatabaseClient {
 
     try {
       const pool = this.getPool();
-      const res = await pool.query(
-        `INSERT INTO background_jobs (
-           entry_id, website_url, is_scheduled_update, status, attempts, max_attempts, created_at, updated_at
-         ) VALUES ($1, $2, $3, 'QUEUED', 0, $4, NOW(), NOW())
-         RETURNING *`,
-        [payload.entryId, payload.websiteUrl, Boolean(payload.isScheduledUpdate), maxAttempts]
-      );
+      const res = await pool.query(INSERT_BACKGROUND_JOB_SQL, [
+        payload.entryId,
+        payload.websiteUrl,
+        Boolean(payload.isScheduledUpdate),
+        maxAttempts,
+      ]);
       return formatJobRow(res.rows[0]);
     } catch (err) {
       if (isDev) {
@@ -841,21 +699,7 @@ export class DatabaseClient {
 
     try {
       const pool = this.getPool();
-      const sql = `
-        UPDATE background_jobs
-        SET status = 'PROCESSING',
-            attempts = attempts + 1,
-            updated_at = NOW()
-        WHERE id = (
-          SELECT id FROM background_jobs
-          WHERE status = 'QUEUED'
-          ORDER BY created_at ASC
-          LIMIT 1
-          FOR UPDATE SKIP LOCKED
-        )
-        RETURNING *;
-      `;
-      const res = await pool.query(sql);
+      const res = await pool.query(CLAIM_NEXT_BACKGROUND_JOB_SQL);
       if (res.rows.length === 0) {
         if (isDev) {
           for (const job of mockJobsMap.values()) {
@@ -892,13 +736,7 @@ export class DatabaseClient {
 
     try {
       const pool = this.getPool();
-      const res = await pool.query(
-        `UPDATE background_jobs
-         SET status = 'COMPLETED',
-             updated_at = NOW()
-         WHERE id = $1`,
-        [jobId]
-      );
+      const res = await pool.query(COMPLETE_BACKGROUND_JOB_SQL, [jobId]);
       if (isDev && res.rowCount === 0) {
         const job = mockJobsMap.get(jobId);
         if (job) {
@@ -930,7 +768,7 @@ export class DatabaseClient {
     try {
       const pool = this.getPool();
       // First check existing attempts and max_attempts.
-      const checkRes = await pool.query('SELECT attempts, max_attempts FROM background_jobs WHERE id = $1', [jobId]);
+      const checkRes = await pool.query(SELECT_JOB_ATTEMPTS_SQL, [jobId]);
       if (checkRes.rows.length === 0) {
         if (isDev && mockJobsMap.has(jobId)) {
           const job = mockJobsMap.get(jobId)!;
@@ -953,22 +791,7 @@ export class DatabaseClient {
       const isDeadLetter = attemptsToUse >= Number(max_attempts);
       const newStatus: JobStatus = isDeadLetter ? 'DEAD_LETTER' : 'QUEUED';
 
-      const updateSql = isDeadLetter
-        ? `UPDATE background_jobs
-           SET status = 'DEAD_LETTER',
-               attempts = $3,
-               last_error = $2,
-               failed_at = NOW(),
-               updated_at = NOW()
-           WHERE id = $1
-           RETURNING *`
-        : `UPDATE background_jobs
-           SET status = 'QUEUED',
-               attempts = $3,
-               last_error = $2,
-               updated_at = NOW()
-           WHERE id = $1
-           RETURNING *`;
+      const updateSql = isDeadLetter ? FAIL_JOB_DEAD_LETTER_SQL : FAIL_JOB_RETRY_SQL;
 
       const updateRes = await pool.query(updateSql, [jobId, error, attemptsToUse]);
       const job = formatJobRow(updateRes.rows[0]);
@@ -1000,9 +823,7 @@ export class DatabaseClient {
 
     try {
       const pool = this.getPool();
-      const res = await pool.query<BackgroundJob>(
-        "SELECT * FROM background_jobs WHERE status = 'DEAD_LETTER' ORDER BY failed_at DESC"
-      );
+      const res = await pool.query<BackgroundJob>(SELECT_DEAD_LETTER_JOBS_SQL);
       if (isDev && res.rows.length === 0) {
         const list: BackgroundJob[] = [];
         for (const job of mockJobsMap.values()) {
@@ -1034,10 +855,7 @@ export class DatabaseClient {
     try {
       const pool = this.getPool();
       if (status) {
-        const res = await pool.query<BackgroundJob>(
-          'SELECT * FROM background_jobs WHERE status = $1 ORDER BY created_at DESC',
-          [status]
-        );
+        const res = await pool.query<BackgroundJob>(SELECT_BACKGROUND_JOBS_BY_STATUS_SQL, [status]);
         if (isDev && res.rows.length === 0) {
           const list: BackgroundJob[] = [];
           for (const job of mockJobsMap.values()) {
@@ -1049,7 +867,7 @@ export class DatabaseClient {
         }
         return res.rows.map(formatJobRow);
       }
-      const res = await pool.query<BackgroundJob>('SELECT * FROM background_jobs ORDER BY created_at DESC');
+      const res = await pool.query<BackgroundJob>(SELECT_ALL_BACKGROUND_JOBS_SQL);
       if (isDev && res.rows.length === 0) {
         const list: BackgroundJob[] = [];
         for (const job of mockJobsMap.values()) {
@@ -1078,10 +896,8 @@ export class DatabaseClient {
 
     try {
       const pool = this.getPool();
-      await pool.query(
-        "UPDATE background_jobs SET status = 'QUEUED', updated_at = NOW() WHERE status = 'PROCESSING'"
-      );
-      await pool.query("DELETE FROM background_jobs WHERE status = 'DEAD_LETTER'");
+      await pool.query(RESET_PROCESSING_JOBS_SQL);
+      await pool.query(DELETE_DEAD_LETTER_JOBS_SQL);
       if (isDev) {
         for (const [id, job] of mockJobsMap.entries()) {
           if (job.status === 'PROCESSING') {
@@ -1112,9 +928,7 @@ export class DatabaseClient {
 
     try {
       const pool = this.getPool();
-      const res = await pool.query(
-        "UPDATE background_jobs SET status = 'QUEUED', attempts = 0, last_error = null, failed_at = null, updated_at = NOW() WHERE status = 'DEAD_LETTER' RETURNING id"
-      );
+      const res = await pool.query(REPROCESS_DEAD_LETTER_JOBS_SQL);
       let count = res.rowCount || 0;
       if (isDev) {
         for (const job of mockJobsMap.values()) {
@@ -1156,14 +970,7 @@ export class DatabaseClient {
     try {
       const pool = this.getPool();
       const cleanRel = relPath.replace(/^\/+/, '');
-      await pool.query(
-        `INSERT INTO storage_files (rel_path, content, updated_at)
-         VALUES ($1, $2, NOW())
-         ON CONFLICT (rel_path) DO UPDATE SET
-           content = EXCLUDED.content,
-           updated_at = NOW()`,
-        [cleanRel, content]
-      );
+      await pool.query(UPSERT_STORAGE_FILE_SQL, [cleanRel, content]);
     } catch {
       // Ignore storage persistence errors in mock/dev fallback.
     }
@@ -1177,7 +984,7 @@ export class DatabaseClient {
     try {
       const pool = this.getPool();
       const cleanRel = relPath.replace(/^\/+/, '');
-      const res = await pool.query('SELECT content FROM storage_files WHERE rel_path = $1 LIMIT 1', [cleanRel]);
+      const res = await pool.query(SELECT_STORAGE_FILE_SQL, [cleanRel]);
       if (res.rows.length > 0 && typeof res.rows[0].content === 'string') {
         return res.rows[0].content;
       }
@@ -1194,7 +1001,7 @@ export class DatabaseClient {
     }
     try {
       const pool = this.getPool();
-      const res = await pool.query('SELECT rel_path, content FROM storage_files ORDER BY updated_at DESC');
+      const res = await pool.query(LIST_STORAGE_FILES_SQL);
       return res.rows.map((r: any) => ({
         rel_path: String(r.rel_path),
         content: String(r.content),
