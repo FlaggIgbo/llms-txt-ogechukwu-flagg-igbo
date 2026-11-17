@@ -46,6 +46,7 @@ export enum ApiErrorMessage {
   GET_ENTRIES_FAILED = 'Failed to retrieve site entries from database',
   CREATE_ENTRY_FAILED = 'Failed to create site entry',
   SEARCH_FAILED = 'Search failed',
+  INTERNAL_ERROR = 'Internal server error',
 }
 
 // A website record in the directory.

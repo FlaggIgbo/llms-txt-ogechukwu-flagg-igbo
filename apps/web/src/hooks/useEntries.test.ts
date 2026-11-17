@@ -446,4 +446,21 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
       assert.equal(parsed.code, ApiErrorCode.CONFLICT);
     });
   });
+
+  describe('saveStorageFile and getStorageFile storage operations', () => {
+    it('persists and retrieves storage file via dev fallback', async () => {
+      const testPath = 'test-org/docs/llms.txt';
+      const testContent = '# Test Docs\n\n> Summary';
+
+      await db.saveStorageFile(testPath, testContent);
+      const retrieved = await db.getStorageFile(testPath);
+
+      assert.equal(retrieved, testContent);
+    });
+
+    it('returns null when storage file does not exist', async () => {
+      const retrieved = await db.getStorageFile('non-existent-path/llms.txt');
+      assert.equal(retrieved, null);
+    });
+  });
 });

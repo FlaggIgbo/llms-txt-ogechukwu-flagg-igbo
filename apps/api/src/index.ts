@@ -69,23 +69,37 @@ export function startApiServer(port: number = PORT): void {
         res.end(content);
         return;
       } catch {
-        const dbContent = await db.getStorageFile(relPath);
-        if (dbContent !== null) {
-          res.writeHead(200, {
-            'Content-Type': 'text/plain; charset=utf-8',
-            'Access-Control-Allow-Origin': '*',
-          });
-          res.end(dbContent);
+        try {
+          const dbContent = await db.getStorageFile(relPath);
+          if (dbContent !== null) {
+            res.writeHead(200, {
+              'Content-Type': 'text/plain; charset=utf-8',
+              'Access-Control-Allow-Origin': '*',
+            });
+            res.end(dbContent);
+            return;
+          }
+
+          // File truly does not exist
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              error: ApiErrorMessage.NOT_FOUND,
+              code: ApiErrorCode.NOT_FOUND,
+            })
+          );
+          return;
+        } catch {
+          // Database failure occurred while fetching storage file
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              error: ApiErrorMessage.INTERNAL_ERROR,
+              code: ApiErrorCode.DATABASE_ERROR,
+            })
+          );
           return;
         }
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            error: ApiErrorMessage.NOT_FOUND,
-            code: ApiErrorCode.NOT_FOUND,
-          })
-        );
-        return;
       }
     }
 
