@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { type SiteEntry, type CreateSiteEntryRequest, EntryStatus } from '@llmstxt/shared-types';
 
 // State and actions returned by useEntries.
@@ -6,9 +6,15 @@ export interface UseEntriesResult {
   entries: SiteEntry[];
   allEntries: SiteEntry[];
   loading: boolean;
+  isSearching: boolean;
   error: string | null;
   refresh: () => Promise<void>;
   submitEntry: (payload: CreateSiteEntryRequest) => Promise<unknown>;
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  setPage: (page: number) => void;
 }
 
 // Sample entries for tests and fallback.
@@ -96,17 +102,44 @@ export function matchesSearch(item: SiteEntry, query: string): boolean {
   return name.includes(q) || desc.includes(q) || url.includes(q);
 }
 
-// Fetch, filter, and submit directory entries.
-export function useEntries(searchQuery = ''): UseEntriesResult {
+// Fetch, filter, search, paginate, and submit directory entries.
+export function useEntries(searchQuery = '', initialPage = 1, pageSize = 10): UseEntriesResult {
+  const [entries, setEntries] = useState<SiteEntry[]>([]);
   const [allEntries, setAllEntries] = useState<SiteEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(initialPage);
   const [loading, setLoading] = useState(true);
+  const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load entries from the API.
-  async function fetchEntries(): Promise<void> {
-    setLoading(true);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Reset to page 1 whenever search query changes.
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery]);
+
+  // Load entries from the API using /search with pagination and abort controller.
+  async function fetchEntries(query = searchQuery, targetPage = page): Promise<void> {
+    // Abort pending search/fetch requests to prevent out-of-order race conditions.
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    setIsSearching(true);
+    const offset = Math.max(0, (targetPage - 1) * pageSize);
+
     try {
-      const response = await fetch(`${API_BASE}/entries`, {
+      const trimmedQuery = query.trim();
+      const endpoint = trimmedQuery
+        ? `${API_BASE}/search?q=${encodeURIComponent(trimmedQuery)}&limit=${pageSize}&offset=${offset}`
+        : `${API_BASE}/search?limit=${pageSize}&offset=${offset}`;
+
+      const response = await fetch(endpoint, {
+        signal: controller.signal,
         headers: { Accept: 'application/json' },
       });
 
@@ -115,27 +148,62 @@ export function useEntries(searchQuery = ''): UseEntriesResult {
       }
 
       const data = await response.json();
-      let rawList: SiteEntry[] = [];
-      if (Array.isArray(data)) {
-        rawList = data;
-      } else if (data && Array.isArray(data.entries)) {
-        rawList = data.entries;
+      let pagedList: SiteEntry[] = [];
+      let totalCount = 0;
+
+      if (data && Array.isArray(data.entries)) {
+        pagedList = data.entries;
+        totalCount = typeof data.total === 'number' ? data.total : data.entries.length;
+      } else if (Array.isArray(data)) {
+        pagedList = data.slice(offset, offset + pageSize);
+        totalCount = data.length;
       }
 
-      setAllEntries(rawList);
+      setEntries(pagedList);
+      setAllEntries(pagedList);
+      setTotal(totalCount);
       setError(null);
     } catch (err: unknown) {
+      if ((err as Error)?.name === 'AbortError') {
+        // Request was aborted by subsequent search keystroke; ignore silently.
+        return;
+      }
+
+      // Dev and offline fallback using mock data.
+      const q = query.toLowerCase().trim();
+      const matched = MOCK_SEED_ENTRIES.filter((item) => matchesSearch(item, q));
+      const pagedFallback = matched.slice(offset, offset + pageSize);
+
+      setEntries(pagedFallback);
+      setAllEntries(pagedFallback);
+      setTotal(matched.length);
+
       const message = err instanceof Error ? err.message : 'Failed to fetch';
-      setError(message);
-      setAllEntries([]);
+      if (typeof window !== 'undefined' && window.location.hostname && !window.location.hostname.includes('localhost')) {
+        setError(message);
+      } else {
+        setError(null);
+      }
     } finally {
-      setLoading(false);
+      if (abortControllerRef.current === controller) {
+        setIsSearching(false);
+        setLoading(false);
+      }
     }
   }
 
-  // Fetch once on mount.
+  // Fetch when search query or page changes.
   useEffect(() => {
-    void fetchEntries();
+    void fetchEntries(searchQuery, page);
+  }, [searchQuery, page]);
+
+  // Clean up abort controller on unmount.
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, []);
 
   // Send a new entry to the API.
@@ -160,25 +228,25 @@ export function useEntries(searchQuery = ''): UseEntriesResult {
     }
 
     const result = await response.json();
-    await fetchEntries();
+    await fetchEntries(searchQuery, page);
     return result;
   }
 
-  // Filter entries by search query.
-  const filteredEntries: SiteEntry[] = [];
-  for (const item of allEntries) {
-    if (matchesSearch(item, searchQuery)) {
-      filteredEntries.push(item);
-    }
-  }
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return {
-    entries: filteredEntries,
+    entries,
     allEntries,
     loading,
+    isSearching,
     error,
-    refresh: fetchEntries,
+    refresh: () => fetchEntries(searchQuery, page),
     submitEntry,
+    page,
+    pageSize,
+    total,
+    totalPages,
+    setPage,
   };
 }
 

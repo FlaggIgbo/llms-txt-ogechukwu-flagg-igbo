@@ -5,6 +5,7 @@ import { renderToString } from 'react-dom/server';
 import { useEntries, useUpdatingEntries, matchesSearch, MOCK_SEED_ENTRIES } from './useEntries.js';
 import { resolveLlmTxtUrl, DirectoryTable } from '../components/DirectoryTable.js';
 import { DirectoryCard } from '../components/DirectoryCard.js';
+import { SearchBar } from '../components/SearchBar.js';
 import {
   isValidUrl,
   SubmissionForm,
@@ -362,6 +363,36 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
     });
   });
 
+  describe('SearchBar Component', () => {
+    it('renders input wrapper and hides spinner when loading is false', () => {
+      const html = renderToString(
+        React.createElement(SearchBar, {
+          value: 'test',
+          onChange: () => {},
+          loading: false,
+        })
+      );
+
+      assert.ok(html.includes('search-bar-wrapper'));
+      assert.ok(html.includes('value="test"'));
+      assert.ok(!html.includes('search-spinner'));
+    });
+
+    it('renders search-spinner inside wrapper when loading is true', () => {
+      const html = renderToString(
+        React.createElement(SearchBar, {
+          value: 'fast',
+          onChange: () => {},
+          loading: true,
+        })
+      );
+
+      assert.ok(html.includes('search-bar-wrapper'));
+      assert.ok(html.includes('search-spinner'));
+      assert.ok(html.includes('search-loading'));
+    });
+  });
+
   describe('HomePage', () => {
     it('hides table and footer when error banner is shown', () => {
       const html = renderToString(
@@ -379,6 +410,29 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
       assert.ok(html.includes('Failed to fetch (localhost:4000)'));
       assert.ok(!html.includes('table-wrapper'));
       assert.ok(!html.includes('directory-footer'));
+    });
+
+    it('renders pagination controls when totalPages > 1', () => {
+      const html = renderToString(
+        React.createElement(HomePage, {
+          entries: MOCK_SEED_ENTRIES.slice(0, 2),
+          loading: false,
+          error: null,
+          searchQuery: '',
+          onSearchChange: () => {},
+          onRefresh: async () => {},
+          page: 1,
+          totalPages: 2,
+          total: 4,
+          onPageChange: () => {},
+        })
+      );
+
+      assert.ok(html.includes('pagination-controls'));
+      assert.ok(html.includes('Previous'));
+      assert.ok(html.includes('Page 1 of 2'));
+      assert.ok(html.includes('Next'));
+      assert.ok(html.includes('Showing 2 of 4 entries'));
     });
   });
 

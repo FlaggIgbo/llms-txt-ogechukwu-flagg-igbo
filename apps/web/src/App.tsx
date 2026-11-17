@@ -21,7 +21,18 @@ function getInitialTab(): TabType {
 export function App(): React.ReactElement {
   const [activeTab, setActiveTab] = useState<TabType>(getInitialTab);
   const [searchQuery, setSearchQuery] = useState('');
-  const { entries, loading, error, refresh, submitEntry } = useEntries(searchQuery);
+  const {
+    entries,
+    loading,
+    isSearching,
+    error,
+    refresh,
+    submitEntry,
+    page,
+    totalPages,
+    total,
+    setPage,
+  } = useEntries(searchQuery);
   const {
     updatingEntries,
     loading: updatingLoading,
@@ -101,10 +112,15 @@ export function App(): React.ReactElement {
         <HomePage
           entries={entries}
           loading={loading}
+          isSearching={isSearching}
           error={error}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           onRefresh={refresh}
+          page={page}
+          totalPages={totalPages}
+          total={total}
+          onPageChange={setPage}
         />
       )}
 
