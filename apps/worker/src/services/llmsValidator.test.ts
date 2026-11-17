@@ -6,7 +6,7 @@ import {
   assertValidLlmsFiles,
   LlmsValidationError,
 } from './llmsValidator.js';
-import { uploadToStorage } from './storageUpload.js';
+import { uploadToStorage, resolveStorageConfig } from './storageUpload.js';
 
 const SAMPLE_VALID_LLMS_TXT = `# FastHTML
 
@@ -138,6 +138,24 @@ test('uploadToStorage: validates and prevents writing invalid files to storage',
       assert.ok(err instanceof LlmsValidationError);
       return true;
     }
+  );
+});
+
+test('resolveStorageConfig: accepts minio and configures S3/MinIO defaults', () => {
+  const config = resolveStorageConfig({ STORAGE_PROVIDER: 'minio' });
+  assert.equal(config.kind, 'r2');
+  assert.equal(config.endpoint, 'http://localhost:9000');
+  assert.equal(config.bucket, 'llmstxt-files-bucket');
+  assert.equal(config.accessKeyId, 'minioadmin');
+  assert.equal(config.secretAccessKey, 'minioadmin');
+});
+
+test('resolveStorageConfig: rejects local storage provider', () => {
+  assert.throws(
+    () => {
+      resolveStorageConfig({ STORAGE_PROVIDER: 'local' });
+    },
+    /Unsupported STORAGE_PROVIDER "local" \(expected "minio" or "r2"\)/
   );
 });
 

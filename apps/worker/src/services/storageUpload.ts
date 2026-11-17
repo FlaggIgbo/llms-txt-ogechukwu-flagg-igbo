@@ -69,16 +69,30 @@ const encodeObjectKey = (key: string): string =>
 // Read storage settings from the environment once. Pure apart from the `env`
 // argument, so it can be tested without touching process.env.
 //
-//   STORAGE_PROVIDER      "local" (default) or "r2"
+//   STORAGE_PROVIDER      "minio" (development) or "r2" (production)
 //   CLOUDFLARE_ACCOUNT_ID used to build the R2 endpoint
 //   R2_ENDPOINT           optional endpoint override (e.g. a local emulator)
 //   R2_REGION             optional, defaults to "auto"
 //   R2_LLMS_TXT_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
 export function resolveStorageConfig(env: NodeJS.ProcessEnv = process.env): StorageConfig {
-  const provider = (env.STORAGE_PROVIDER || 'local').trim().toLowerCase();
-  if (provider === 'local') return { kind: 'local' };
+  const provider = (env.STORAGE_PROVIDER || 'minio').trim().toLowerCase();
+  if (provider === 'minio') {
+    const endpoint = env.S3_ENDPOINT || env.R2_ENDPOINT || 'http://localhost:9000';
+    const bucket = env.R2_LLMS_TXT_BUCKET || 'llmstxt-files-bucket';
+    const accessKeyId = env.AWS_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID || 'minioadmin';
+    const secretAccessKey = env.AWS_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY || 'minioadmin';
+
+    return {
+      kind: 'r2',
+      endpoint,
+      region: env.R2_REGION || 'us-east-1',
+      bucket,
+      accessKeyId,
+      secretAccessKey,
+    };
+  }
   if (provider !== 'r2') {
-    throw new Error(`Unsupported STORAGE_PROVIDER "${provider}" (expected "local" or "r2")`);
+    throw new Error(`Unsupported STORAGE_PROVIDER "${provider}" (expected "minio" or "r2")`);
   }
 
   const accountId = env.CLOUDFLARE_ACCOUNT_ID;

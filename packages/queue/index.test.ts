@@ -105,6 +105,14 @@ describe('GenerationQueue with retries and DLQ', () => {
   });
 
   describe('PostgreSQL background_jobs table (Option B)', () => {
+    beforeEach(async () => {
+      let leftover = await db.claimNextBackgroundJob();
+      while (leftover) {
+        await db.completeBackgroundJob(leftover.id);
+        leftover = await db.claimNextBackgroundJob();
+      }
+    });
+
     it('creates and claims queued jobs with FOR UPDATE SKIP LOCKED', async () => {
       const job = await db.createBackgroundJob({
         entryId: MOCK_SEED_ENTRIES[0].id,

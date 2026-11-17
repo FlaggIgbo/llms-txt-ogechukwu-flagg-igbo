@@ -9,16 +9,27 @@ export const KNOWN_CATEGORIES = Object.values(SiteCategory);
 
 // Default re-check interval (hours) per site category.
 const INTERVAL_HOURS: Record<SiteCategory, number> = {
+  // 6 hours: High change frequency, fast-breaking information and daily news reporting.
   [SiteCategory.NEWS_MEDIA]: 6,
+  // 12 hours: Frequent publication cycles and multi-author blog updates.
   [SiteCategory.BLOG]: 12,
+  // 24 hours (1 day): Regular publication schedule for long-form essays and articles.
   [SiteCategory.BLOG_ESSAYS]: 24,
+  // 48 hours (2 days): Occasional product updates, changelogs, and feature releases.
   [SiteCategory.SAAS_APPLICATION]: 48,
+  // 72 hours (3 days): Infrequent marketing copy, pricing, and landing page adjustments.
   [SiteCategory.MARKETING]: 72,
+  // 72 hours (3 days): Core navigational structure and search landing portals change slowly.
   [SiteCategory.SEARCH_ENGINE]: 72,
+  // 72 hours (3 days): Structural/index pages remain stable despite underlying user chatter.
   [SiteCategory.COMMUNITY_PLATFORM]: 72,
+  // 168 hours (7 days): Stable technical documentation aligned with software release sprints.
   [SiteCategory.API_DOCS]: 168,
+  // 168 hours (7 days): Reference guides and technical manuals updated primarily on version bumps.
   [SiteCategory.TECHNICAL_DOCS]: 168,
+  // 168 hours (7 days): Official public notices and slow-moving regulatory documentation.
   [SiteCategory.GOVERNMENT_PORTAL]: 168,
+  // 336 hours (14 days): Highly static formal RFCs, protocols, and standard specifications.
   [SiteCategory.STANDARDS_SPECIFICATION]: 336,
 };
 
