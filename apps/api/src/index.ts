@@ -41,9 +41,26 @@ export function startApiServer(port: number = PORT): void {
       return handleSearch(req, res);
     }
 
-    // Serve stored .txt files from local disk or PostgreSQL storage_files fallback.
+    // Serve stored .txt files from MinIO/S3 cluster, local disk, or PostgreSQL storage_files fallback.
     if (pathname.startsWith('/storage/') && req.method === 'GET') {
       const relPath = pathname.slice('/storage/'.length);
+
+      // If MinIO / S3 cluster is configured, redirect directly to S3 / MinIO
+      const s3Base = process.env.S3_PUBLIC_URL || process.env.R2_PUBLIC_URL || process.env.S3_ENDPOINT;
+      const s3Bucket = process.env.R2_LLMS_TXT_BUCKET || process.env.S3_BUCKET || 'llmstxt-files-bucket';
+      if (s3Base) {
+        const cleanBase = s3Base.endsWith('/') ? s3Base.slice(0, -1) : s3Base;
+        const targetUrl = cleanBase.endsWith(`/${s3Bucket}`)
+          ? `${cleanBase}/${relPath}`
+          : `${cleanBase}/${s3Bucket}/${relPath}`;
+        res.writeHead(302, {
+          Location: targetUrl,
+          'Access-Control-Allow-Origin': '*',
+        });
+        res.end();
+        return;
+      }
+
       const storageDir = path.resolve(process.env.LOCAL_STORAGE_DIR || './data/storage');
       const safePath = path.normalize(path.join(storageDir, relPath));
 

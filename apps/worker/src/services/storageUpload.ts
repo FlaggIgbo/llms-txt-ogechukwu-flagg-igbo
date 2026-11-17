@@ -26,18 +26,31 @@ function sha256Hex(data: string): string {
   return crypto.createHash('sha256').update(data, 'utf8').digest('hex');
 }
 
-// Upload a single text object to Cloudflare R2 using AWS Signature Version 4 (S3-compatible API).
+// Upload a single text object to Cloudflare R2 or local MinIO/S3 using AWS Signature Version 4.
 export async function putObjectToR2(params: {
-  accountId: string;
+  accountId?: string;
   accessKeyId: string;
   secretAccessKey: string;
   bucket: string;
   key: string;
   body: string;
+  endpoint?: string;
 }): Promise<boolean> {
   const { accountId, accessKeyId, secretAccessKey, bucket, key, body } = params;
-  const host = `${accountId}.r2.cloudflarestorage.com`;
-  const region = 'auto';
+  const endpoint = params.endpoint || process.env.S3_ENDPOINT;
+
+  let host: string;
+  let protocol = 'https:';
+
+  if (endpoint) {
+    const parsed = new URL(endpoint);
+    host = parsed.host;
+    protocol = parsed.protocol;
+  } else {
+    host = `${accountId || 'local'}.r2.cloudflarestorage.com`;
+  }
+
+  const region = endpoint ? (process.env.AWS_REGION || 'us-east-1') : 'auto';
   const service = 's3';
 
   const now = new Date();
@@ -83,7 +96,7 @@ export async function putObjectToR2(params: {
     .digest('hex');
 
   const authorization = `${algorithm} Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-  const url = `https://${host}${canonicalUri}`;
+  const url = `${protocol}//${host}${canonicalUri}`;
 
   const res = await fetch(url, {
     method: 'PUT',
@@ -99,7 +112,7 @@ export async function putObjectToR2(params: {
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    throw new Error(`R2 PUT failed (${res.status}) for ${canonicalUri}: ${errText}`);
+    throw new Error(`S3/R2 PUT failed (${res.status}) for ${canonicalUri}: ${errText}`);
   }
 
   return true;
@@ -129,17 +142,22 @@ export async function uploadToStorage(
   await fs.writeFile(llmsTxtPath, llmsTxt, 'utf-8');
   await fs.writeFile(llmsFullTxtPath, llmsFullTxt, 'utf-8');
 
-  // Upload to Cloudflare R2 via S3 SigV4 PUT if provider is r2 and credentials exist.
-  if (provider === 'r2') {
-    const bucket = process.env.R2_LLMS_TXT_BUCKET || 'llmstxt-files-bucket';
+  // Upload to Cloudflare R2 / MinIO via S3 SigV4 PUT if provider is r2/s3/minio or S3_ENDPOINT is set.
+  const endpoint = process.env.S3_ENDPOINT || process.env.R2_ENDPOINT;
+  const isS3Provider = provider === 'r2' || provider === 's3' || provider === 'minio' || Boolean(endpoint);
+
+  if (isS3Provider) {
+    const bucket = process.env.R2_LLMS_TXT_BUCKET || process.env.S3_BUCKET || 'llmstxt-files-bucket';
     const txtKey = `${folderName}/llms.txt`;
     const fullTxtKey = `${folderName}/llms-full.txt`;
 
-    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-    const accessKeyId = process.env.R2_ACCESS_KEY_ID;
-    const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || 'local';
+    const accessKeyId =
+      process.env.R2_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID || (endpoint ? 'minioadmin' : undefined);
+    const secretAccessKey =
+      process.env.R2_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY || (endpoint ? 'minioadmin' : undefined);
 
-    if (accountId && accessKeyId && secretAccessKey) {
+    if (accessKeyId && secretAccessKey) {
       try {
         await putObjectToR2({
           accountId,
@@ -148,6 +166,7 @@ export async function uploadToStorage(
           bucket,
           key: txtKey,
           body: llmsTxt,
+          endpoint,
         });
         await putObjectToR2({
           accountId,
@@ -156,14 +175,16 @@ export async function uploadToStorage(
           bucket,
           key: fullTxtKey,
           body: llmsFullTxt,
+          endpoint,
         });
 
+        const uriScheme = endpoint ? 's3' : 'r2';
         return {
-          llmsTxtUri: `r2://${bucket}/${txtKey}`,
-          llmsFullTxtUri: `r2://${bucket}/${fullTxtKey}`,
+          llmsTxtUri: `${uriScheme}://${bucket}/${txtKey}`,
+          llmsFullTxtUri: `${uriScheme}://${bucket}/${fullTxtKey}`,
         };
       } catch (err) {
-        // If R2 upload fails in environments where bucket/network isn't reachable, fall back to local/API storage path.
+        // If S3/R2 upload fails in environments where bucket/network isn't reachable, fall back to local/API storage path.
         if (process.env.NODE_ENV !== 'test') {
           console.warn(`[StorageUpload] R2 upload fallback to local storage: ${err}`);
         }

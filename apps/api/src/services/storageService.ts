@@ -13,20 +13,29 @@ export class StorageService {
       return storageUri;
     }
 
-    // Handle Cloudflare R2 paths (r2://bucket/key).
-    if (storageUri.startsWith('r2://')) {
-      const publicBase = process.env.R2_PUBLIC_URL;
-      const pathWithoutPrefix = storageUri.slice(5);
+    // Handle Cloudflare R2 / MinIO / S3 paths (r2://bucket/key or s3://bucket/key).
+    if (storageUri.startsWith('r2://') || storageUri.startsWith('s3://')) {
+      const publicBase = process.env.R2_PUBLIC_URL || process.env.S3_PUBLIC_URL;
+      const pathWithoutPrefix = storageUri.replace(/^(r2|s3):\/\//, '');
       const parts = pathWithoutPrefix.split('/');
+      const bucket = parts[0];
       const key = parts.slice(1).join('/');
 
       if (publicBase) {
         const cleanBase = publicBase.endsWith('/') ? publicBase.slice(0, -1) : publicBase;
-        return `${cleanBase}/${key}`;
+        if (cleanBase.endsWith(`/${bucket}`)) {
+          return `${cleanBase}/${key}`;
+        }
+        return `${cleanBase}/${bucket}/${key}`;
+      }
+
+      const s3Endpoint = process.env.S3_ENDPOINT || process.env.R2_ENDPOINT;
+      if (s3Endpoint) {
+        const cleanEndpoint = s3Endpoint.endsWith('/') ? s3Endpoint.slice(0, -1) : s3Endpoint;
+        return `${cleanEndpoint}/${bucket}/${key}`;
       }
 
       const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-      const bucket = parts[0];
       if (accountId) {
         return `https://${accountId}.r2.cloudflarestorage.com/${bucket}/${key}`;
       }
