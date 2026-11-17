@@ -72,6 +72,14 @@ export class StorageService {
 
   // Fetch file content from Cloudflare R2, MinIO, or local disk.
   async fetchFile(keyPath: string): Promise<string | null> {
+    if (!keyPath) return null;
+
+    // Normalize keyPath, removing any local file:// prefix if present
+    const cleanKey = keyPath
+      .replace(/^file:\/\/[^?#]*\/data\/storage\//, '')
+      .replace(/^file:\/\/[^?#]*\/tmp\/storage\//, '')
+      .replace(/^\/+/, '');
+
     const isMinio = (process.env.STORAGE_PROVIDER || 'minio').trim().toLowerCase() === 'minio';
 
     if (isMinio) {
@@ -79,7 +87,7 @@ export class StorageService {
       const bucket = process.env.R2_LLMS_TXT_BUCKET || 'llmstxt-files-bucket';
       const cleanEndpoint = endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint;
       try {
-        const res = await fetch(`${cleanEndpoint}/${bucket}/${keyPath.replace(/^\/+/, '')}`);
+        const res = await fetch(`${cleanEndpoint}/${bucket}/${cleanKey}`);
         if (res.ok) {
           return await res.text();
         }
@@ -98,7 +106,7 @@ export class StorageService {
           const text = await this.fetchFromR2({
             endpoint,
             bucket,
-            key: keyPath.replace(/^\/+/, ''),
+            key: cleanKey,
             accessKeyId,
             secretAccessKey,
           });
@@ -111,7 +119,7 @@ export class StorageService {
 
     // Local disk fallback (logged to Sentry via logWarn)
     const baseDir = path.resolve(process.env.LOCAL_STORAGE_DIR || './data/storage');
-    const localPath = path.join(baseDir, keyPath);
+    const localPath = path.join(baseDir, cleanKey);
     try {
       const content = await fs.readFile(localPath, 'utf-8');
       logWarn(`[StorageService] Falling back to local disk storage for ${keyPath}`, {

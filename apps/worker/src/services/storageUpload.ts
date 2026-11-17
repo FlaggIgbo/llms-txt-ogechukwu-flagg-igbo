@@ -76,8 +76,8 @@ export function resolveStorageConfig(env: NodeJS.ProcessEnv = process.env): Stor
   if (provider === 'minio') {
     const endpoint = env.S3_ENDPOINT || 'http://localhost:9000';
     const bucket = env.R2_LLMS_TXT_BUCKET || 'llmstxt-files-bucket';
-    const accessKeyId = env.AWS_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID || 'minioadmin';
-    const secretAccessKey = env.AWS_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY || 'minioadmin';
+    const accessKeyId = env.AWS_ACCESS_KEY_ID || env.MINIO_ACCESS_KEY || 'minioadmin';
+    const secretAccessKey = env.AWS_SECRET_ACCESS_KEY || env.MINIO_SECRET_KEY || 'minioadmin';
 
     return {
       kind: 'r2',

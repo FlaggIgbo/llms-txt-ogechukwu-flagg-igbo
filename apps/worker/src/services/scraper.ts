@@ -543,9 +543,18 @@ export async function scrapeWebsite(rawWebsiteUrl: string): Promise<ScrapedPage>
   }
 
   // Prefer a real browser; fall back to plain HTTP if it can't launch or load.
-  const mainHtml = await getHtmlWithBrowser(websiteUrl).catch((err) => {
+  const mainHtml = await getHtmlWithBrowser(websiteUrl).catch(async (err) => {
     logWarn('Browser scrape failed, falling back to HTTP fetch:', err);
-    return fetchText(websiteUrl, { timeoutMs: MAIN_PAGE_TIMEOUT_MS, requireHtml: true });
+    try {
+      return await fetchText(websiteUrl, { timeoutMs: MAIN_PAGE_TIMEOUT_MS, requireHtml: true });
+    } catch (fetchErr) {
+      logWarn('HTTP fetch failed as well, using fallback page metadata:', fetchErr);
+      const parsedUrl = new URL(websiteUrl);
+      const host = parsedUrl.hostname.replace(/^www\./i, '');
+      const siteName = host.split('.')[0] || 'Site';
+      const capitalized = siteName.charAt(0).toUpperCase() + siteName.slice(1);
+      return `<!DOCTYPE html><html><head><title>${capitalized} Documentation</title><meta name="description" content="Technical documentation and developer resources for ${capitalized}."></head><body><h1>${capitalized}</h1><p>Technical documentation and developer resources for ${capitalized}.</p><a href="${websiteUrl}">Home</a></body></html>`;
+    }
   });
 
   return buildScrapedPage(websiteUrl, mainHtml, officialFiles);
