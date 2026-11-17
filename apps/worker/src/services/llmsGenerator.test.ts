@@ -268,5 +268,6 @@ test('checkExistingLlmsTxt: discovers official llms.txt on docs.[domain] subdoma
   const result = await checkExistingLlmsTxt('https://perplexity.ai');
   assert.ok(result !== null);
   assert.ok(result.llmsTxt.includes('Perplexity'));
+  assert.equal(result.llmsTxtUrl, 'https://docs.perplexity.ai/llms.txt');
   assert.ok(result.llmsFullTxt && result.llmsFullTxt.length > 0);
 });
