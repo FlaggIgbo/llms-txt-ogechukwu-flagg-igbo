@@ -1,4 +1,4 @@
-import type { SearchQuery, SearchResult, SiteEntry } from '@llmstxt/shared-types';
+import type { SearchQuery, SearchResult } from '@llmstxt/shared-types';
 import { db } from '@llmstxt/database';
 
 // Wrapper around database search methods.

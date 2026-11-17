@@ -9,7 +9,7 @@ export interface SearchBarProps {
   debounceMs?: number;
 }
 
-// Text input with debounced updates and a loading spinner for filtering directory entries.
+// Debounced search input with immediate UI responsiveness and an inline loading spinner.
 export function SearchBar({
   value,
   onChange,
@@ -17,15 +17,16 @@ export function SearchBar({
   placeholder = 'Search directory...',
   debounceMs = 300,
 }: SearchBarProps) {
+  // Local state provides immediate keystroke feedback while debouncing parent updates.
   const [localValue, setLocalValue] = useState(value);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Sync external value changes (e.g. clear/reset).
+  // Sync with external prop changes (e.g., cleared filters).
   useEffect(() => {
     setLocalValue(value);
   }, [value]);
 
-  // Clean up timer on unmount.
+  // Cancel pending debounce timer on unmount.
   useEffect(() => {
     return () => {
       if (timerRef.current) {
@@ -34,6 +35,7 @@ export function SearchBar({
     };
   }, []);
 
+  // Update input immediately, then delay firing onChange until typing pauses.
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const newVal = e.target.value;
     setLocalValue(newVal);
@@ -47,6 +49,7 @@ export function SearchBar({
     }, debounceMs);
   }
 
+  // Bypass debounce on Enter to trigger search immediately.
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') {
       if (timerRef.current) {
@@ -66,6 +69,7 @@ export function SearchBar({
         onChange={handleChange}
         onKeyDown={handleKeyDown}
       />
+      {/* Visual spinner indicator shown during active queries */}
       {loading && (
         <span
           className="search-spinner"

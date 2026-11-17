@@ -1,6 +1,5 @@
 import http from 'node:http';
 import path from 'node:path';
-import { db } from '@llmstxt/database';
 import { ApiErrorCode, ApiErrorMessage } from '@llmstxt/shared-types';
 import { handleGetEntries, handlePostEntry } from './routes/entries.js';
 import { handleSearch } from './routes/search.js';
@@ -40,7 +39,7 @@ export function startApiServer(port: number = PORT): void {
       return handleSearch(req, res);
     }
 
-    // Serve stored .txt files from Cloudflare R2 / S3 or PostgreSQL storage_files fallback.
+    // Serve stored .txt files via Cloudflare R2 / S3 redirect.
     if (pathname.startsWith('/storage/') && req.method === 'GET') {
       const relPath = pathname.slice('/storage/'.length);
 
@@ -72,38 +71,15 @@ export function startApiServer(port: number = PORT): void {
         return;
       }
 
-      // Retrieve file contents directly from PostgreSQL storage_files.
-      try {
-        const dbContent = await db.getStorageFile(relPath);
-        if (dbContent !== null) {
-          res.writeHead(200, {
-            'Content-Type': 'text/plain; charset=utf-8',
-            'Access-Control-Allow-Origin': '*',
-          });
-          res.end(dbContent);
-          return;
-        }
-
-        // File truly does not exist
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            error: ApiErrorMessage.NOT_FOUND,
-            code: ApiErrorCode.NOT_FOUND,
-          })
-        );
-        return;
-      } catch {
-        // Database failure occurred while fetching storage file
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            error: ApiErrorMessage.INTERNAL_ERROR,
-            code: ApiErrorCode.DATABASE_ERROR,
-          })
-        );
-        return;
-      }
+      // Files are stored exclusively in Cloudflare R2.
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error: ApiErrorMessage.NOT_FOUND,
+          code: ApiErrorCode.NOT_FOUND,
+        })
+      );
+      return;
     }
 
     // Default health check response.

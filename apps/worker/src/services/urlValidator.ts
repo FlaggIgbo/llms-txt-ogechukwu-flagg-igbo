@@ -52,7 +52,7 @@ export function isPrivateOrReservedIp(ip: string): boolean {
   return true;
 }
 
-// Validate that a submitted URL is syntactically valid and does not resolve to private or cloud metadata IPs (SSRF protection).
+// Validate that a submitted URL is syntactically valid and does not resolve to private or cloud metadata IPs (Server-Side Request Forgery protection).
 export async function validatePublicUrl(
   rawUrl: string,
   options?: { allowLocal?: boolean }

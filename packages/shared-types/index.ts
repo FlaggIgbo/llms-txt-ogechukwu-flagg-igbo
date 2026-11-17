@@ -122,7 +122,8 @@ export interface GenerateJobPayload {
 // Status of a cadence check.
 export type CadenceStatus = 'idle' | 'queued' | 'processing';
 
-// Known category types for a website.
+// Known category types for a website. This should be updated manually as more
+// websites llm files are generated
 export enum SiteCategory {
   API_DOCS = 'api_docs',
   BLOG = 'blog',

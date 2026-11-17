@@ -35,6 +35,7 @@ const sampleCardMinimal: SiteEntry = {
   updated_at: '2026-11-12T18:45:00.000Z',
 };
 
+// Harness is used as an isolated component test bench and screenshot fixture
 function Harness(): React.ReactElement {
   const [searchValue, setSearchValue] = useState('fastapi');
 
@@ -70,7 +71,7 @@ function Harness(): React.ReactElement {
         <h2>Search Bar</h2>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <div id="harness-search-bar-empty" style={{ background: '#ffffff', padding: '1rem', border: '1px solid #d0d7de', borderRadius: '6px' }}>
-            <SearchBar value="" onChange={() => {}} />
+            <SearchBar value="" onChange={() => { }} />
           </div>
 
           <div id="harness-search-bar-filled" style={{ background: '#ffffff', padding: '1rem', border: '1px solid #d0d7de', borderRadius: '6px' }}>
@@ -126,7 +127,7 @@ function Harness(): React.ReactElement {
           <div>
             <h3>Pristine / Empty Form</h3>
             <div id="harness-submission-form-empty" style={{ background: '#ffffff', padding: '1rem', border: '1px solid #d0d7de', borderRadius: '6px' }}>
-              <SubmissionForm onSubmit={async () => {}} />
+              <SubmissionForm onSubmit={async () => { }} />
             </div>
           </div>
 
@@ -242,7 +243,7 @@ function Harness(): React.ReactElement {
               justifyContent: 'center',
             }}
           >
-            <PaginationControls page={2} totalPages={5} onPageChange={() => {}} />
+            <PaginationControls page={2} totalPages={5} onPageChange={() => { }} />
           </div>
         </div>
       </section>

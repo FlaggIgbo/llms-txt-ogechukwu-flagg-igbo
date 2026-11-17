@@ -1,4 +1,3 @@
-import React from 'react';
 import type { SiteEntry } from '@llmstxt/shared-types';
 
 // Props for the directory table.

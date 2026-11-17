@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { db } from '@llmstxt/database';
 import { generationQueue } from '@llmstxt/queue';
 import type { UpdateLog } from '@llmstxt/shared-types';
@@ -15,7 +16,7 @@ export async function checkStaleSites(batchSize: number = 50): Promise<UpdateLog
     });
 
     logs.push({
-      id: `log_${Date.now()}_${site.site_id}`,
+      id: randomUUID(),
       entry_id: site.site_id,
       website_url: site.url,
       checked_at: new Date().toISOString(),

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import {
   type SiteEntry,
@@ -8,12 +9,11 @@ import {
   type JobStatus,
   EntryStatus,
   EntryErrorCode,
-  EntryErrorMessage,
   SiteCategory,
   ApiErrorCode,
   ApiErrorMessage,
 } from '@llmstxt/shared-types';
-import { logWarn, logError } from '@llmstxt/logger';
+import { logWarn } from '@llmstxt/logger';
 import {
   ENSURE_SCHEMA_SQL,
   UPSERT_SEED_ENTRY_SQL,
@@ -42,9 +42,6 @@ import {
   RESET_PROCESSING_JOBS_SQL,
   DELETE_DEAD_LETTER_JOBS_SQL,
   REPROCESS_DEAD_LETTER_JOBS_SQL,
-  UPSERT_STORAGE_FILE_SQL,
-  SELECT_STORAGE_FILE_SQL,
-  LIST_STORAGE_FILES_SQL,
 } from './queries.js';
 
 // Database connection URL.
@@ -55,8 +52,6 @@ const connectionString =
 const mockCadenceMap = new Map<string, SiteCadence>();
 // In-memory background jobs for development fallback.
 const mockJobsMap = new Map<string, BackgroundJob>();
-// In-memory fallback map for dev mode and tests
-const mockStorageFiles = new Map<string, string>();
 
 // Convert a raw DB row into a BackgroundJob.
 function formatJobRow(row: any): BackgroundJob {
@@ -220,9 +215,9 @@ export class DatabaseClient {
         connectionString,
         ssl: isRemote
           ? {
-              rejectUnauthorized,
-              ca: process.env.DATABASE_CA_CERT,
-            }
+            rejectUnauthorized,
+            ca: process.env.DATABASE_CA_CERT,
+          }
           : undefined,
         allowExitOnIdle: true,
       });
@@ -235,7 +230,7 @@ export class DatabaseClient {
     if (this.hasEnsuredSeed) return;
     try {
       const pool = this.getPool();
-      await pool.query(ENSURE_SCHEMA_SQL).catch(() => {});
+      await pool.query(ENSURE_SCHEMA_SQL).catch(() => { });
 
       for (const entry of MOCK_SEED_ENTRIES) {
         await pool.query(UPSERT_SEED_ENTRY_SQL, [
@@ -253,7 +248,7 @@ export class DatabaseClient {
       }
 
       // Recover any entries or jobs stuck in PROCESSING from a previous restart and backfill orphaned PENDING entries.
-      await pool.query(RECOVER_STUCK_PROCESSING_SQL).catch(() => {});
+      await pool.query(RECOVER_STUCK_PROCESSING_SQL).catch(() => { });
 
       this.hasEnsuredSeed = true;
     } catch (err) {
@@ -508,7 +503,7 @@ export class DatabaseClient {
       }
     } catch (err) {
       if (isDev) {
-        const id = `00000000-0000-0000-0000-${Date.now().toString().slice(-12).padStart(12, '0')}`;
+        const id = randomUUID();
         const newEntry: SiteEntry = {
           id,
           website_name: websiteName,
@@ -556,7 +551,7 @@ export class DatabaseClient {
       if (isDev) {
         const claimed: SiteCadence[] = [];
         const now = Date.now();
-        for (const [id, cad] of mockCadenceMap.entries()) {
+        for (const cad of mockCadenceMap.values()) {
           if (cad.status === 'idle' && new Date(cad.next_check_at).getTime() <= now) {
             cad.status = 'queued';
             claimed.push({ ...cad });
@@ -618,7 +613,7 @@ export class DatabaseClient {
   // Insert a new background job into the queue table.
   async createBackgroundJob(payload: GenerateJobPayload, maxAttempts: number = 3): Promise<BackgroundJob> {
     const isDev = isDevMode();
-    const id = `00000000-0000-0000-0000-${Date.now().toString().slice(-12).padStart(12, '0')}`;
+    const id = randomUUID();
     const now = new Date().toISOString();
 
     const newJob: BackgroundJob = {
@@ -757,8 +752,6 @@ export class DatabaseClient {
       const { attempts, max_attempts } = checkRes.rows[0];
       const attemptsToUse = currentAttempts !== undefined ? currentAttempts : Number(attempts);
       const isDeadLetter = attemptsToUse >= Number(max_attempts);
-      const newStatus: JobStatus = isDeadLetter ? 'DEAD_LETTER' : 'QUEUED';
-
       const updateSql = isDeadLetter ? FAIL_JOB_DEAD_LETTER_SQL : FAIL_JOB_RETRY_SQL;
 
       const updateRes = await pool.query(updateSql, [jobId, error, attemptsToUse]);
@@ -925,80 +918,6 @@ export class DatabaseClient {
           }
         }
         return count;
-      }
-      throw err;
-    }
-  }
-
-  // Persist generated .txt file content in PostgreSQL so API and worker containers share access.
-  async saveStorageFile(relPath: string, content: string): Promise<void> {
-    const cleanRel = relPath.replace(/^\/+/, '');
-    const isDev = isDevMode();
-    if (!this.hasEnsuredSeed) {
-      await this.ensureDevelopmentSeed();
-    }
-    try {
-      const pool = this.getPool();
-      await pool.query(UPSERT_STORAGE_FILE_SQL, [cleanRel, content]);
-      if (isDev) {
-        mockStorageFiles.set(cleanRel, content);
-      }
-    } catch (err) {
-      logError(err, { method: 'saveStorageFile', relPath: cleanRel });
-      if (isDev) {
-        // In dev/test environment, keep in-memory fallback so tests pass without a live Postgres server
-        mockStorageFiles.set(cleanRel, content);
-        return;
-      }
-      // In production, re-throw so the background job fails, retries, and notifies the DLQ
-      throw err;
-    }
-  }
-
-  // Retrieve generated .txt file content from PostgreSQL.
-  async getStorageFile(relPath: string): Promise<string | null> {
-    const cleanRel = relPath.replace(/^\/+/, '');
-    const isDev = isDevMode();
-    if (!this.hasEnsuredSeed) {
-      await this.ensureDevelopmentSeed();
-    }
-    try {
-      const pool = this.getPool();
-      const res = await pool.query(SELECT_STORAGE_FILE_SQL, [cleanRel]);
-      if (res.rows.length > 0 && typeof res.rows[0].content === 'string') {
-        return res.rows[0].content;
-      }
-      return isDev ? (mockStorageFiles.get(cleanRel) ?? null) : null;
-    } catch (err) {
-      logError(err, { method: 'getStorageFile', relPath: cleanRel });
-      if (isDev) {
-        return mockStorageFiles.get(cleanRel) ?? null;
-      }
-      // Re-throw so callers can distinguish a DB error from a missing file
-      throw err;
-    }
-  }
-
-  // List all stored .txt files from PostgreSQL for R2 synchronization.
-  async listStorageFiles(): Promise<Array<{ rel_path: string; content: string }>> {
-    const isDev = isDevMode();
-    if (!this.hasEnsuredSeed) {
-      await this.ensureDevelopmentSeed();
-    }
-    try {
-      const pool = this.getPool();
-      const res = await pool.query(LIST_STORAGE_FILES_SQL);
-      return res.rows.map((r: any) => ({
-        rel_path: String(r.rel_path),
-        content: String(r.content),
-      }));
-    } catch (err) {
-      logError(err, { method: 'listStorageFiles' });
-      if (isDev) {
-        return Array.from(mockStorageFiles.entries()).map(([rel_path, content]) => ({
-          rel_path,
-          content,
-        }));
       }
       throw err;
     }

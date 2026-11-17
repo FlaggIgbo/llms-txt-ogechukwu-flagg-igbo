@@ -87,7 +87,7 @@ export function checkIpRateLimit(
 }
 
 // Record a successful entry submission for a given client IP.
-export function recordIpSubmission(ip: string, limit: number = DAILY_ENTRY_LIMIT): void {
+export function recordIpSubmission(ip: string): void {
   const now = Date.now();
   const record = ipSubmissionMap.get(ip);
 

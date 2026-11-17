@@ -83,14 +83,6 @@ export async function handleGenerateJob(payload: GenerateJobPayload): Promise<vo
 
     const uploaded = await uploadToStorage(websiteUrl, files.llmsTxt, files.llmsFullTxt);
 
-    // Also persist generated files in PostgreSQL so API and worker containers share access.
-    const folderName = websiteUrl
-      .replace(/^https?:\/\//, '')
-      .replace(/\/+$/, '')
-      .replace(/[^a-zA-Z0-9.-]/g, '_');
-    await db.saveStorageFile(`${folderName}/llms.txt`, files.llmsTxt);
-    await db.saveStorageFile(`${folderName}/llms-full.txt`, files.llmsFullTxt);
-
     // Update main entry record.
     await db.updateEntry(entryId, {
       website_name: scraped.title,

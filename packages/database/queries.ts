@@ -76,12 +76,6 @@ export const ENSURE_SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_background_jobs_queue ON background_jobs (status, created_at) WHERE status = 'QUEUED';
   CREATE INDEX IF NOT EXISTS idx_background_jobs_dlq ON background_jobs (status, failed_at) WHERE status = 'DEAD_LETTER';
-
-  CREATE TABLE IF NOT EXISTS storage_files (
-    rel_path TEXT PRIMARY KEY,
-    content TEXT NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  );
 `;
 
 export const UPSERT_SEED_ENTRY_SQL = `
@@ -292,20 +286,4 @@ export const DELETE_DEAD_LETTER_JOBS_SQL = "DELETE FROM background_jobs WHERE st
 
 export const REPROCESS_DEAD_LETTER_JOBS_SQL =
   "UPDATE background_jobs SET status = 'QUEUED', attempts = 0, last_error = null, failed_at = null, updated_at = NOW() WHERE status = 'DEAD_LETTER' RETURNING id";
-
-// ==========================================
-// Storage Files queries
-// ==========================================
-
-export const UPSERT_STORAGE_FILE_SQL = `
-  INSERT INTO storage_files (rel_path, content, updated_at)
-  VALUES ($1, $2, NOW())
-  ON CONFLICT (rel_path) DO UPDATE SET
-    content = EXCLUDED.content,
-    updated_at = NOW()
-`;
-
-export const SELECT_STORAGE_FILE_SQL = 'SELECT content FROM storage_files WHERE rel_path = $1 LIMIT 1';
-
-export const LIST_STORAGE_FILES_SQL = 'SELECT rel_path, content FROM storage_files ORDER BY updated_at DESC';
 

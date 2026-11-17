@@ -9,10 +9,8 @@ import { SearchBar } from '../components/SearchBar.js';
 import {
   isValidUrl,
   SubmissionForm,
-  DAILY_ENTRY_LIMIT,
   RATE_LIMIT_STORAGE_KEY,
   getSessionSubmissionCount,
-  recordSessionSubmission,
   isSessionRateLimited,
 } from '../components/SubmissionForm.js';
 import {
@@ -620,23 +618,6 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
       const parsed = JSON.parse(responseBody);
       assert.equal(parsed.error, ApiErrorMessage.DUPLICATE_URL);
       assert.equal(parsed.code, ApiErrorCode.CONFLICT);
-    });
-  });
-
-  describe('saveStorageFile and getStorageFile storage operations', () => {
-    it('persists and retrieves storage file via dev fallback', async () => {
-      const testPath = 'test-org/docs/llms.txt';
-      const testContent = '# Test Docs\n\n> Summary';
-
-      await db.saveStorageFile(testPath, testContent);
-      const retrieved = await db.getStorageFile(testPath);
-
-      assert.equal(retrieved, testContent);
-    });
-
-    it('returns null when storage file does not exist', async () => {
-      const retrieved = await db.getStorageFile('non-existent-path/llms.txt');
-      assert.equal(retrieved, null);
     });
   });
 });

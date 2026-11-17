@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { GenerateJobPayload, BackgroundJob } from '@llmstxt/shared-types';
 import { logError, logWarn } from '@llmstxt/logger';
 import { db } from '@llmstxt/database';
@@ -41,7 +42,6 @@ export class GenerationQueue {
   private deadLetterHandlers: DeadLetterHandler[] = [];
   private deadLetterQueue: DeadLetterJob[] = [];
   private activeJobs = new Map<string, QueueJob>();
-  private jobCounter = 0;
   private maxRetries = 3;
   private retryDelayMs = 100;
   private dbPollingTimer: ReturnType<typeof setInterval> | null = null;
@@ -59,7 +59,7 @@ export class GenerationQueue {
 
   // Add a job to the queue and insert into Postgres background_jobs table.
   async enqueueGenerateJob(payload: GenerateJobPayload): Promise<{ jobId: string }> {
-    let jobId = `job_${Date.now()}_${++this.jobCounter}`;
+    let jobId: string = randomUUID();
     let persistedInDb = false;
 
     try {

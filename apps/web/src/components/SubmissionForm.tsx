@@ -111,7 +111,7 @@ export function SubmissionForm({ onSubmit, onNavigateToUpdates }: SubmissionForm
     setSubmitError(null);
     setSubmitSuccess(false);
 
-    // Enforce daily rate limit (20 entries per day).
+    // Enforce daily rate limit.
     if (isSessionRateLimited()) {
       setSubmitError(ApiErrorMessage.RATE_LIMIT_EXCEEDED);
       return;
