@@ -1,5 +1,5 @@
 import React from 'react';
-import type { SiteEntry } from '@llmstxt/shared-types';
+import { type SiteEntry, EntryErrorCode, EntryErrorMessage } from '@llmstxt/shared-types';
 import { resolveLlmTxtUrl, formatDateTime } from '../components/DirectoryTable';
 
 // Props for the updates page.
@@ -133,12 +133,14 @@ export function UpdatesPage({
                       <div className="status-cell-wrapper">
                         {renderStatusBadge(entry)}
                         {entry.status === 'FAILED' &&
-                          entry.error_message?.toLowerCase().includes('already exists') && (
+                          (entry.error_code === EntryErrorCode.DUPLICATE_URL ||
+                            entry.error_message === EntryErrorMessage.DUPLICATE_URL ||
+                            entry.error_message?.toLowerCase().includes('already exists')) && (
                             <span
                               className="entry-error-tag error-duplicate-url"
-                              title={entry.error_message}
+                              title={entry.error_message || EntryErrorMessage.DUPLICATE_URL}
                             >
-                              {entry.error_message}
+                              {entry.error_message || EntryErrorMessage.DUPLICATE_URL}
                             </span>
                           )}
                       </div>

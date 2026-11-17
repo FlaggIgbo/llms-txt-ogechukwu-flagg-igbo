@@ -1,11 +1,13 @@
 import pg from 'pg';
-import type {
-  SiteEntry,
-  CreateSiteEntryRequest,
-  SiteCadence,
-  BackgroundJob,
-  GenerateJobPayload,
-  JobStatus,
+import {
+  type SiteEntry,
+  type CreateSiteEntryRequest,
+  type SiteCadence,
+  type BackgroundJob,
+  type GenerateJobPayload,
+  type JobStatus,
+  EntryErrorCode,
+  EntryErrorMessage,
 } from '@llmstxt/shared-types';
 import { logWarn } from '@llmstxt/logger';
 
@@ -127,9 +129,16 @@ function formatRow(row: any): SiteEntry {
     llmTxt = `${trimTrailingSlashes(String(row.website_url))}/llms.txt`;
   }
 
+  const errorCode =
+    (row.error_code as EntryErrorCode) ||
+    (row.error_message?.toLowerCase().includes('already exists')
+      ? EntryErrorCode.DUPLICATE_URL
+      : null);
+
   return {
     ...row,
     error_message: row.error_message || null,
+    error_code: errorCode,
     is_scheduled_update: Boolean(row.is_scheduled_update),
     created_at: createdAt,
     updated_at: updatedAt,
@@ -192,12 +201,14 @@ export class DatabaseClient {
              llms_full_txt_storage TEXT,
              status entry_status NOT NULL DEFAULT 'PENDING',
              error_message TEXT,
+             error_code TEXT,
              is_scheduled_update BOOLEAN NOT NULL DEFAULT FALSE,
              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
              updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
            );
 
            ALTER TABLE site_entries ADD COLUMN IF NOT EXISTS error_message TEXT;
+           ALTER TABLE site_entries ADD COLUMN IF NOT EXISTS error_code TEXT;
            ALTER TABLE site_entries ADD COLUMN IF NOT EXISTS is_scheduled_update BOOLEAN NOT NULL DEFAULT FALSE;
            ALTER TABLE site_entries DROP CONSTRAINT IF EXISTS site_entries_website_url_key;
            CREATE UNIQUE INDEX IF NOT EXISTS idx_site_entries_completed_url ON site_entries (website_url) WHERE status = 'COMPLETED';
@@ -318,7 +329,7 @@ export class DatabaseClient {
     }
 
     const selectAllSql =
-      'SELECT id, website_name, website_url, website_short_description, is_updated_latest, llms_txt_storage, llms_full_txt_storage, status, error_message, is_scheduled_update, created_at, updated_at FROM site_entries ORDER BY updated_at DESC';
+      'SELECT id, website_name, website_url, website_short_description, is_updated_latest, llms_txt_storage, llms_full_txt_storage, status, error_message, error_code, is_scheduled_update, created_at, updated_at FROM site_entries ORDER BY updated_at DESC';
 
     try {
       const pool = this.getPool();
@@ -548,7 +559,7 @@ export class DatabaseClient {
     // Check if the URL already exists in our site_entries table.
     const existing = await this.getEntryByUrl(input.website_url);
     if (existing && existing.status === 'COMPLETED') {
-      const duplicateError = 'Website URL already exists in site_entries table';
+      const duplicateError = EntryErrorMessage.DUPLICATE_URL;
       const id = `00000000-0000-0000-0000-${Date.now().toString().slice(-12).padStart(12, '0')}`;
       const duplicateEntry: SiteEntry = {
         id,
@@ -561,6 +572,7 @@ export class DatabaseClient {
         llm_txt: llmsTxt || existing.llm_txt,
         status: 'FAILED',
         error_message: duplicateError,
+        error_code: EntryErrorCode.DUPLICATE_URL,
         is_scheduled_update: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -590,8 +602,8 @@ export class DatabaseClient {
           `INSERT INTO site_entries (
              website_name, website_url, website_short_description,
              llms_txt_storage, llms_full_txt_storage, status, is_updated_latest,
-             error_message, is_scheduled_update
-           ) VALUES ($1, $2, $3, $4, $5, 'FAILED', FALSE, $6, FALSE)
+             error_message, error_code, is_scheduled_update
+           ) VALUES ($1, $2, $3, $4, $5, 'FAILED', FALSE, $6, $7, FALSE)
            RETURNING *`,
           [
             duplicateEntry.website_name,
@@ -600,6 +612,7 @@ export class DatabaseClient {
             duplicateEntry.llms_txt_storage,
             duplicateEntry.llms_full_txt_storage,
             duplicateError,
+            EntryErrorCode.DUPLICATE_URL,
           ]
         );
         return { entry: formatRow(res.rows[0]), cadence: duplicateCadence };

@@ -23,6 +23,7 @@ import { db } from '@llmstxt/database';
 import { HomePage } from '../pages/HomePage.js';
 import { AddEntryPage } from '../pages/AddEntryPage.js';
 import { UpdatesPage } from '../pages/UpdatesPage.js';
+import { EntryErrorCode, EntryErrorMessage } from '@llmstxt/shared-types';
 import { App } from '../App.js';
 
 describe('useEntries and MOCK_SEED_ENTRIES', () => {
@@ -289,7 +290,8 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
         website_name: 'FastAPI Clone',
         website_url: 'https://fastapi.tiangolo.com',
         status: 'FAILED' as const,
-        error_message: 'Website URL already exists in site_entries table',
+        error_code: EntryErrorCode.DUPLICATE_URL,
+        error_message: EntryErrorMessage.DUPLICATE_URL,
         is_scheduled_update: false,
       };
 
@@ -393,6 +395,8 @@ describe('useEntries and MOCK_SEED_ENTRIES', () => {
 
       assert.equal(result.entry.status, 'FAILED');
       assert.equal(result.entry.is_scheduled_update, false);
+      assert.equal(result.entry.error_code, EntryErrorCode.DUPLICATE_URL);
+      assert.equal(result.entry.error_message, EntryErrorMessage.DUPLICATE_URL);
       assert.ok(result.entry.error_message?.includes('already exists in site_entries'));
     });
   });

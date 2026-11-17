@@ -1,4 +1,4 @@
-import type { IncomingMessage } from 'node:http';
+import type { TypedApiRequest } from '@llmstxt/shared-types';
 
 // Default maximum allowed entry additions per day per user IP.
 export const DAILY_ENTRY_LIMIT = 20;
@@ -13,7 +13,9 @@ interface RateLimitRecord {
 const ipSubmissionMap = new Map<string, RateLimitRecord>();
 
 // Extract the client's IP address from incoming request headers or socket.
-export function getClientIp(req: IncomingMessage): string {
+export function getClientIp<TBody = unknown, TQuery = Record<string, string | undefined>>(
+  req: TypedApiRequest<TBody, TQuery>
+): string {
   const forwarded = req.headers['x-forwarded-for'];
   if (typeof forwarded === 'string' && forwarded.length > 0) {
     return forwarded.split(',')[0].trim();

@@ -1,7 +1,11 @@
 import { db } from '@llmstxt/database';
 import { generationQueue, type DeadLetterJob } from '@llmstxt/queue';
 import { logError } from '@llmstxt/logger';
-import type { GenerateJobPayload } from '@llmstxt/shared-types';
+import {
+  type GenerateJobPayload,
+  EntryErrorCode,
+  EntryErrorMessage,
+} from '@llmstxt/shared-types';
 import { scrapeWebsite } from '../services/scraper.js';
 import {
   generateLlmsTxtFiles,
@@ -22,7 +26,8 @@ export async function handleGenerateJob(payload: GenerateJobPayload): Promise<vo
     if (existing && existing.id !== entryId && existing.status === 'COMPLETED') {
       await db.updateEntry(entryId, {
         status: 'FAILED',
-        error_message: 'Website URL already exists in site_entries table',
+        error_message: EntryErrorMessage.DUPLICATE_URL,
+        error_code: EntryErrorCode.DUPLICATE_URL,
         is_scheduled_update: false,
       });
       return;
@@ -140,7 +145,8 @@ export async function handleDeadLetterJob(dlqJob: DeadLetterJob): Promise<void> 
     // User-submitted entry failed: mark as FAILED with error message to show on updates page.
     await db.updateEntry(entryId, {
       status: 'FAILED',
-      error_message: dlqJob.error || 'Failed to crawl and generate llms.txt files after 3 attempts',
+      error_message: dlqJob.error || EntryErrorMessage.GENERATION_FAILED,
+      error_code: dlqJob.error ? EntryErrorCode.CRAWL_FAILED : EntryErrorCode.GENERATION_FAILED,
       is_scheduled_update: false,
     });
   }

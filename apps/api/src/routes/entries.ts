@@ -1,7 +1,19 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
 import { db } from '@llmstxt/database';
 import { generationQueue } from '@llmstxt/queue';
-import type { SiteEntry, CreateSiteEntryRequest } from '@llmstxt/shared-types';
+import {
+  type SiteEntry,
+  type CreateSiteEntryRequest,
+  type CreateSiteEntryResponse,
+  type GetEntriesRequest,
+  type GetEntriesResponseMessage,
+  type GetEntriesResponse,
+  type PostEntryRequest,
+  type PostEntryResponseMessage,
+  type TypedApiRequest,
+  type TypedApiResponse,
+  ApiErrorCode,
+  ApiErrorMessage,
+} from '@llmstxt/shared-types';
 import { logError } from '../services/logger.js';
 import { storageService } from '../services/storageService.js';
 import {
@@ -11,16 +23,35 @@ import {
   DAILY_ENTRY_LIMIT,
 } from '../services/rateLimiter.js';
 
-// Read JSON body from incoming HTTP request.
-async function parseJsonBody<T>(req: IncomingMessage): Promise<T> {
+// Send a strongly-typed JSON payload over a TypedApiResponse.
+export function sendJsonResponse<T>(
+  res: TypedApiResponse<T>,
+  statusCode: number,
+  payload: T,
+  extraHeaders: Record<string, string> = {}
+): void {
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
+    ...extraHeaders,
+  });
+  res.end(JSON.stringify(payload));
+}
+
+// Read JSON body from incoming typed HTTP request.
+async function parseJsonBody<T>(req: TypedApiRequest<T>): Promise<T> {
+  if (req.body !== undefined) {
+    return req.body;
+  }
   return new Promise((resolve, reject) => {
     let body = '';
     req.on('data', (chunk) => {
-      body += chunk;
+      body += String(chunk);
     });
     req.on('end', () => {
       try {
-        resolve(body ? JSON.parse(body) : {});
+        resolve(body ? (JSON.parse(body) as T) : ({} as T));
       } catch (err) {
         reject(err);
       }
@@ -50,11 +81,14 @@ export function formatEntryStorageUrls(entry: SiteEntry): SiteEntry {
 }
 
 // Return directory entries filtered by status or default to completed entries.
-export async function handleGetEntries(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function handleGetEntries(
+  req: GetEntriesRequest,
+  res: GetEntriesResponseMessage
+): Promise<void> {
   try {
     const rawUrl = req.url || '/';
     const parsedUrl = new URL(rawUrl, `http://${req.headers.host || 'localhost'}`);
-    const statusParam = parsedUrl.searchParams.get('status');
+    const statusParam = req.query?.status ?? parsedUrl.searchParams.get('status');
 
     let entries = await db.listEntries();
 
@@ -78,44 +112,41 @@ export async function handleGetEntries(req: IncomingMessage, res: ServerResponse
       entries = entries.filter((entry) => entry.status.toLowerCase() === statusParam.toLowerCase());
     }
 
-    const formatted = entries.map(formatEntryStorageUrls);
-
-    res.writeHead(200, {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    });
-    res.end(JSON.stringify(formatted));
+    const formatted: GetEntriesResponse = entries.map(formatEntryStorageUrls);
+    sendJsonResponse(res, 200, formatted);
   } catch (error) {
     logError(error, { endpoint: 'GET /entries' });
-    res.writeHead(500, {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
+    sendJsonResponse(res, 500, {
+      error: ApiErrorMessage.GET_ENTRIES_FAILED,
+      code: ApiErrorCode.DATABASE_ERROR,
     });
-    res.end(JSON.stringify({ error: 'Failed to retrieve site entries from database' }));
   }
 }
 
 // Create a new site entry with an initial cadence schedule.
-export async function handlePostEntry(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function handlePostEntry(
+  req: PostEntryRequest,
+  res: PostEntryResponseMessage
+): Promise<void> {
   try {
     // Check IP rate limit (max 20 entries per day per IP).
     const clientIp = getClientIp(req);
     const rateCheck = checkIpRateLimit(clientIp);
 
     if (!rateCheck.allowed) {
-      res.writeHead(429, {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Retry-After': String(rateCheck.retryAfterSeconds),
-        'X-RateLimit-Limit': String(DAILY_ENTRY_LIMIT),
-        'X-RateLimit-Remaining': '0',
-      });
-      res.end(
-        JSON.stringify({
-          error:
-            'You have exceeded your allowed entry adds for today (maximum 20 entries per day). Please try again tomorrow.',
+      sendJsonResponse<CreateSiteEntryResponse>(
+        res,
+        429,
+        {
+          error: ApiErrorMessage.RATE_LIMIT_EXCEEDED,
+          code: ApiErrorCode.RATE_LIMIT_EXCEEDED,
           retryAfter: rateCheck.retryAfterSeconds,
-        })
+        },
+        {
+          'Retry-After': String(rateCheck.retryAfterSeconds),
+          'X-RateLimit-Limit': String(DAILY_ENTRY_LIMIT),
+          'X-RateLimit-Remaining': '0',
+        }
       );
       return;
     }
@@ -123,11 +154,10 @@ export async function handlePostEntry(req: IncomingMessage, res: ServerResponse)
     const body = await parseJsonBody<CreateSiteEntryRequest>(req);
 
     if (!body.website_url) {
-      res.writeHead(400, {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
+      sendJsonResponse(res, 400, {
+        error: ApiErrorMessage.WEBSITE_URL_REQUIRED,
+        code: ApiErrorCode.BAD_REQUEST,
       });
-      res.end(JSON.stringify({ error: 'website_url is required' }));
       return;
     }
 
@@ -146,19 +176,15 @@ export async function handlePostEntry(req: IncomingMessage, res: ServerResponse)
     // Record submission for rate limiter.
     recordIpSubmission(clientIp);
 
-    res.writeHead(201, {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
+    sendJsonResponse(res, 201, formatEntryStorageUrls(entry), {
       'X-RateLimit-Limit': String(DAILY_ENTRY_LIMIT),
       'X-RateLimit-Remaining': String(Math.max(0, rateCheck.remaining - 1)),
     });
-    res.end(JSON.stringify(formatEntryStorageUrls(entry)));
   } catch (error) {
     logError(error, { endpoint: 'POST /entries' });
-    res.writeHead(500, {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
+    sendJsonResponse(res, 500, {
+      error: ApiErrorMessage.CREATE_ENTRY_FAILED,
+      code: ApiErrorCode.INTERNAL_ERROR,
     });
-    res.end(JSON.stringify({ error: 'Failed to create site entry' }));
   }
 }

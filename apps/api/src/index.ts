@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { db } from '@llmstxt/database';
+import { ApiErrorCode, ApiErrorMessage } from '@llmstxt/shared-types';
 import { handleGetEntries, handlePostEntry } from './routes/entries.js';
 import { handleSearch } from './routes/search.js';
 import { initSentry, logInfo } from './services/logger.js';
@@ -49,7 +50,12 @@ export function startApiServer(port: number = PORT): void {
       // Block paths outside the storage folder.
       if (!safePath.startsWith(storageDir)) {
         res.writeHead(403, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Forbidden' }));
+        res.end(
+          JSON.stringify({
+            error: ApiErrorMessage.FORBIDDEN,
+            code: ApiErrorCode.FORBIDDEN,
+          })
+        );
         return;
       }
 
@@ -73,7 +79,12 @@ export function startApiServer(port: number = PORT): void {
           return;
         }
         res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'File not found' }));
+        res.end(
+          JSON.stringify({
+            error: ApiErrorMessage.NOT_FOUND,
+            code: ApiErrorCode.NOT_FOUND,
+          })
+        );
         return;
       }
     }

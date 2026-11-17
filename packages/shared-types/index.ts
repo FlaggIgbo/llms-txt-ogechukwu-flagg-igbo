@@ -1,6 +1,45 @@
 // Possible states of a site entry.
 export type EntryStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
+// Canonical error codes for site entries.
+export enum EntryErrorCode {
+  DUPLICATE_URL = 'DUPLICATE_URL',
+  CRAWL_FAILED = 'CRAWL_FAILED',
+  PROBE_TIMEOUT = 'PROBE_TIMEOUT',
+  INVALID_URL = 'INVALID_URL',
+  GENERATION_FAILED = 'GENERATION_FAILED',
+}
+
+// Canonical error messages for site entries.
+export enum EntryErrorMessage {
+  DUPLICATE_URL = 'Website URL already exists in site_entries table',
+  GENERATION_FAILED = 'Failed to crawl and generate llms.txt files after 3 attempts',
+  PROBE_TIMEOUT = 'Probe timeout',
+}
+
+// Canonical API error codes.
+export enum ApiErrorCode {
+  BAD_REQUEST = 'BAD_REQUEST',
+  UNAUTHORIZED = 'UNAUTHORIZED',
+  FORBIDDEN = 'FORBIDDEN',
+  NOT_FOUND = 'NOT_FOUND',
+  RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED',
+  DATABASE_ERROR = 'DATABASE_ERROR',
+  INTERNAL_ERROR = 'INTERNAL_ERROR',
+  SEARCH_FAILED = 'SEARCH_FAILED',
+}
+
+// Canonical API error messages.
+export enum ApiErrorMessage {
+  FORBIDDEN = 'Forbidden',
+  NOT_FOUND = 'File not found',
+  RATE_LIMIT_EXCEEDED = 'You have exceeded your allowed entry adds for today (maximum 20 entries per day). Please try again tomorrow.',
+  WEBSITE_URL_REQUIRED = 'website_url is required',
+  GET_ENTRIES_FAILED = 'Failed to retrieve site entries from database',
+  CREATE_ENTRY_FAILED = 'Failed to create site entry',
+  SEARCH_FAILED = 'Search failed',
+}
+
 // A website record in the directory.
 export interface SiteEntry {
   id: string;
@@ -13,6 +52,7 @@ export interface SiteEntry {
   llm_txt?: string | null;
   status: EntryStatus;
   error_message?: string | null;
+  error_code?: EntryErrorCode | string | null;
   is_scheduled_update?: boolean;
   created_at: string;
   updated_at: string;
@@ -102,3 +142,62 @@ export interface UpdateLog {
   r2_log_key: string;
   error_message?: string;
 }
+
+// Standard API error payload.
+export interface ApiErrorResponse {
+  error: string;
+  code?: ApiErrorCode | string;
+  retryAfter?: number;
+}
+
+// Query parameters for GET /entries.
+export interface GetEntriesQueryParams {
+  status?: EntryStatus | 'pending' | 'updating' | string;
+}
+
+// Response body for GET /entries.
+export type GetEntriesResponse = SiteEntry[] | ApiErrorResponse;
+
+// Response body for POST /entries.
+export type CreateSiteEntryResponse = SiteEntry | ApiErrorResponse;
+
+// Response body for GET /search.
+export type SearchEntriesResponse =
+  | SearchResult
+  | (ApiErrorResponse & { entries: SiteEntry[]; total: number });
+
+// Typed HTTP request message parameterized by request body and query params.
+export interface TypedApiRequest<
+  TBody = unknown,
+  TQuery = Record<string, string | undefined>
+> {
+  url?: string;
+  method?: string;
+  headers: Record<string, string | string[] | undefined>;
+  socket: { remoteAddress?: string };
+  body?: TBody;
+  query?: TQuery;
+  on(event: 'data', listener: (chunk: any) => void): this;
+  on(event: 'end', listener: () => void): this;
+  on(event: 'error', listener: (err: Error) => void): this;
+}
+
+// Typed HTTP response message parameterized by response JSON payload.
+export interface TypedApiResponse<TResponseBody = unknown> {
+  readonly __responseType?: TResponseBody;
+  writeHead(statusCode: number, headers?: Record<string, string>): this;
+  setHeader(name: string, value: number | string | readonly string[]): this;
+  end(chunk?: any): this;
+}
+
+// Endpoint-specific request and response message types for GET /entries.
+export type GetEntriesRequest = TypedApiRequest<never, GetEntriesQueryParams>;
+export type GetEntriesResponseMessage = TypedApiResponse<GetEntriesResponse>;
+
+// Endpoint-specific request and response message types for POST /entries.
+export type PostEntryRequest = TypedApiRequest<CreateSiteEntryRequest>;
+export type PostEntryResponseMessage = TypedApiResponse<CreateSiteEntryResponse>;
+
+// Endpoint-specific request and response message types for GET /search.
+export type SearchEntriesRequest = TypedApiRequest<never, SearchQuery>;
+export type SearchEntriesResponseMessage = TypedApiResponse<SearchEntriesResponse>;

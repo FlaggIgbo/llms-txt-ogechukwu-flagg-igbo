@@ -1,33 +1,39 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import {
+  type SearchEntriesRequest,
+  type SearchEntriesResponseMessage,
+  type SearchEntriesResponse,
+  ApiErrorCode,
+  ApiErrorMessage,
+} from '@llmstxt/shared-types';
 import { searchService } from '../services/searchService.js';
 import { logError } from '../services/logger.js';
-import { formatEntryStorageUrls } from './entries.js';
+import { formatEntryStorageUrls, sendJsonResponse } from './entries.js';
 
 // Search entries using URL query parameters.
-export async function handleSearch(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function handleSearch(
+  req: SearchEntriesRequest,
+  res: SearchEntriesResponseMessage
+): Promise<void> {
   try {
     const url = new URL(req.url || '/', 'http://localhost');
-    const q = url.searchParams.get('q') || '';
-    const limit = Number(url.searchParams.get('limit') || '50');
-    const offset = Number(url.searchParams.get('offset') || '0');
+    const q = req.query?.q ?? (url.searchParams.get('q') || '');
+    const limit = Number(req.query?.limit ?? (url.searchParams.get('limit') || '50'));
+    const offset = Number(req.query?.offset ?? (url.searchParams.get('offset') || '0'));
 
     const result = await searchService.searchEntries({ q, limit, offset });
-    const formattedResult = {
+    const formattedResult: SearchEntriesResponse = {
       ...result,
       entries: result.entries.map(formatEntryStorageUrls),
     };
 
-    res.writeHead(200, {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    });
-    res.end(JSON.stringify(formattedResult));
+    sendJsonResponse(res, 200, formattedResult);
   } catch (error) {
     logError(error, { endpoint: 'GET /search' });
-    res.writeHead(500, {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
+    sendJsonResponse(res, 500, {
+      error: ApiErrorMessage.SEARCH_FAILED,
+      code: ApiErrorCode.SEARCH_FAILED,
+      entries: [],
+      total: 0,
     });
-    res.end(JSON.stringify({ error: 'Search failed', entries: [], total: 0 }));
   }
 }
