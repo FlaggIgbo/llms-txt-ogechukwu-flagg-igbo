@@ -7,6 +7,7 @@ COPY package*.json ./
 COPY tsconfig.base.json ./
 COPY packages ./packages
 COPY apps/worker ./apps/worker
+COPY apps/api ./apps/api
 
 # Install npm dependencies
 RUN npm install --ignore-scripts

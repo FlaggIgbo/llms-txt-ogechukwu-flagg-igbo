@@ -28,26 +28,46 @@ export async function initSentry(customDsn?: string): Promise<any> {
   return sentry;
 }
 
-// Log an info message (console + Sentry if initialized).
+// Log an info message (console + Sentry if available).
 export function logInfo(message: string, ...optionalParams: unknown[]): void {
   console.log(message, ...optionalParams);
   if (process.env.SENTRY_DSN) {
     void getSentryClient().then((sentry) => {
-      if (sentry?.isInitialized?.()) {
-        sentry.captureMessage(message, 'info');
+      if (!sentry) return;
+      if (!sentry.isInitialized?.()) {
+        sentry.init({
+          dsn: process.env.SENTRY_DSN,
+          environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'production',
+          tracesSampleRate: 0.1,
+        });
       }
+      const extra =
+        optionalParams.length > 0 && typeof optionalParams[0] === 'object' && optionalParams[0] !== null
+          ? (optionalParams[0] as Record<string, unknown>)
+          : undefined;
+      sentry.captureMessage(message, { level: 'info', extra });
     });
   }
 }
 
-// Log a warning message (console + Sentry if initialized).
+// Log a warning message (console + Sentry if available).
 export function logWarn(message: string, ...optionalParams: unknown[]): void {
   console.warn(message, ...optionalParams);
   if (process.env.SENTRY_DSN) {
     void getSentryClient().then((sentry) => {
-      if (sentry?.isInitialized?.()) {
-        sentry.captureMessage(message, 'warning');
+      if (!sentry) return;
+      if (!sentry.isInitialized?.()) {
+        sentry.init({
+          dsn: process.env.SENTRY_DSN,
+          environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'production',
+          tracesSampleRate: 0.1,
+        });
       }
+      const extra =
+        optionalParams.length > 0 && typeof optionalParams[0] === 'object' && optionalParams[0] !== null
+          ? (optionalParams[0] as Record<string, unknown>)
+          : undefined;
+      sentry.captureMessage(message, { level: 'warning', extra });
     });
   }
 }

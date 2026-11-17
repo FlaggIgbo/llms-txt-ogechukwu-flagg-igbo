@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { logWarn, logError } from './logger.js';
 
 // Handles URLs for Cloudflare R2 and MinIO S3 storage.
 export class StorageService {
@@ -82,7 +83,7 @@ export class StorageService {
         if (res.ok) {
           return await res.text();
         }
-      } catch {}
+      } catch { }
     } else {
       const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || 'e1a9e4e85b017c89fe63a98aced25201';
       const bucket = process.env.R2_LLMS_TXT_BUCKET || 'llmstxt-files-bucket';
@@ -104,16 +105,28 @@ export class StorageService {
           if (text !== null) {
             return text;
           }
-        } catch {}
+        } catch { }
       }
     }
 
-    // Local disk fallback
+    // Local disk fallback (logged to Sentry via logWarn)
     const baseDir = path.resolve(process.env.LOCAL_STORAGE_DIR || './data/storage');
     const localPath = path.join(baseDir, keyPath);
     try {
-      return await fs.readFile(localPath, 'utf-8');
+      const content = await fs.readFile(localPath, 'utf-8');
+      logWarn(`[StorageService] Falling back to local disk storage for ${keyPath}`, {
+        keyPath,
+        localPath,
+        context: 'LocalStorageFallback',
+      });
+      return content;
     } catch {
+      // Hard Error
+      logError(`[StorageService] Failed to retrieve ${keyPath} from cloud storage and local disk fallback not found`, {
+        keyPath,
+        localPath,
+        context: 'LocalStorageFallbackNotFound',
+      });
       return null;
     }
   }
