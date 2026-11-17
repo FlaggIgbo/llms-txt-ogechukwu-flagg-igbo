@@ -1172,6 +1172,23 @@ export class DatabaseClient {
       return null;
     }
   }
+
+  // List all stored .txt files from PostgreSQL for R2 synchronization.
+  async listStorageFiles(): Promise<Array<{ rel_path: string; content: string }>> {
+    if (!this.hasEnsuredSeed) {
+      await this.ensureDevelopmentSeed();
+    }
+    try {
+      const pool = this.getPool();
+      const res = await pool.query('SELECT rel_path, content FROM storage_files ORDER BY updated_at DESC');
+      return res.rows.map((r: any) => ({
+        rel_path: String(r.rel_path),
+        content: String(r.content),
+      }));
+    } catch {
+      return [];
+    }
+  }
 }
 
 export const db = new DatabaseClient();
