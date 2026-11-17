@@ -150,6 +150,47 @@ async function setupApiMockRoutes(page: Page, updatingEntries = MOCK_UPDATING_EN
       body: JSON.stringify(MOCK_ENTRIES),
     });
   });
+
+  // Handle search requests
+  await page.route('**/search*', (route) => {
+    try {
+      const parsedUrl = new URL(route.request().url());
+      const query = (parsedUrl.searchParams.get('q') || '').toLowerCase().trim();
+      const matched = query
+        ? MOCK_ENTRIES.filter(
+            (item) =>
+              item.website_name.toLowerCase().includes(query) ||
+              item.website_url.toLowerCase().includes(query) ||
+              (item.website_short_description &&
+                item.website_short_description.toLowerCase().includes(query))
+          )
+        : MOCK_ENTRIES;
+
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entries: matched,
+          total: matched.length,
+          page: 1,
+          pageSize: 20,
+          totalPages: 1,
+        }),
+      });
+    } catch {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entries: MOCK_ENTRIES,
+          total: MOCK_ENTRIES.length,
+          page: 1,
+          pageSize: 20,
+          totalPages: 1,
+        }),
+      });
+    }
+  });
 }
 
 export async function generateScreenshots(): Promise<string[]> {

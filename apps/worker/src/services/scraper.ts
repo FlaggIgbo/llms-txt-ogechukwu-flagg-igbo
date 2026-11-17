@@ -1,4 +1,4 @@
-import { chromium, type Browser } from 'playwright';
+import { chromium, type BrowserContext } from 'playwright';
 import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import { NodeHtmlMarkdown } from 'node-html-markdown';
@@ -25,7 +25,7 @@ export interface ScrapedPage {
   url: string;
   title: string;
   description: string;
-  links: Array<{ title: string; href: string }>;
+  links: ScrapedLink[];
   textContent: string;
   markdownContent: string;
   subPages: ScrapedSubPage[];
@@ -33,20 +33,62 @@ export interface ScrapedPage {
   officialLlmsFullTxt?: string;
 }
 
+// Official llms.txt files already published by the site.
+interface OfficialFiles {
+  llmsTxt: string;
+  llmsFullTxt?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+const HTML_ACCEPT = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
+
+const MAX_REDIRECTS = 5;
+const MAX_BODY_BYTES = 5 * 1024 * 1024;
+const MAX_LINKS = 25;
+const MAX_SUBPAGES = 20;
+const SUBPAGE_CONCURRENCY = 5;
+
+const MAIN_PAGE_TIMEOUT_MS = 20_000;
+const SUBPAGE_TIMEOUT_MS = 8_000;
+const LLMS_FILE_TIMEOUT_MS = 8_000;
+
+const GENERIC_TITLES = ['home', 'index', 'welcome', 'untitled', 'docs', 'documentation'];
+
+// Pages that are never useful documentation.
+const EXCLUDED_PATHS = [
+  '/login',
+  '/signin',
+  '/signup',
+  '/careers',
+  '/terms',
+  '/privacy',
+  '/contact',
+  '/pricing',
+];
+
+// Sidebar/navigation links are preferred over every anchor on the page.
+const NAV_SELECTOR =
+  'nav a, aside a, [role="navigation"] a, [aria-label*="nav"] a, .sidebar a, .menu a';
+
+// ---------------------------------------------------------------------------
+// URL helpers
+// ---------------------------------------------------------------------------
+
 // Ensure the URL has https:// or http://.
 export function normalizeUrl(rawUrl: string): string {
   const trimmed = rawUrl.trim();
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-    return trimmed;
-  }
-  return `https://${trimmed}`;
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
 // Get the brand name from a domain (e.g. plaid.com -> Plaid).
 export function getBrandNameFromUrl(rawUrl: string): string {
   try {
-    const parsed = new URL(normalizeUrl(rawUrl));
-    const parts = parsed.hostname.split('.');
+    const parts = new URL(normalizeUrl(rawUrl)).hostname.split('.');
     if (parts.length >= 2) {
       const main =
         parts.length >= 3 && parts[0].toLowerCase() === 'docs'
@@ -60,188 +102,118 @@ export function getBrandNameFromUrl(rawUrl: string): string {
   return '';
 }
 
-// Check if two URLs share the same origin domain.
-function isSameOrigin(urlA: string, urlB: string): boolean {
+// Key used to treat "/guide" and "/guide/" as the same page.
+const dedupeKey = (url: URL) => url.origin + url.pathname.replace(/\/+$/, '') + url.search;
+
+// ---------------------------------------------------------------------------
+// Safe HTTP
+// ---------------------------------------------------------------------------
+
+async function discardAndThrow(res: Response, message: string): Promise<never> {
+  await res.body?.cancel().catch(() => { });
+  throw new Error(message);
+}
+
+// fetch() that validates every hop against the SSRF guard. Redirects are
+// followed manually so a public URL cannot bounce us to an internal address.
+async function safeFetch(
+  url: string,
+  timeoutMs: number,
+  headers: Record<string, string> = {}
+): Promise<Response> {
+  const signal = AbortSignal.timeout(timeoutMs);
+  let current = url;
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const check = await validatePublicUrl(current);
+    if (!check.valid) {
+      throw new Error(`SSRF blocked: ${check.error}`);
+    }
+
+    const res = await fetch(current, {
+      headers: { 'User-Agent': USER_AGENT, ...headers },
+      redirect: 'manual',
+      signal,
+    });
+
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
+    if (!location) return res;
+
+    await res.body?.cancel().catch(() => { });
+    current = new URL(location, current).href;
+  }
+
+  throw new Error(`Too many redirects fetching ${url}`);
+}
+
+// Fetch a text body with a timeout, size cap, and optional HTML content check.
+async function fetchText(
+  url: string,
+  options: { timeoutMs?: number; requireHtml?: boolean } = {}
+): Promise<string> {
+  const { timeoutMs = 15_000, requireHtml = false } = options;
+  const res = await safeFetch(url, timeoutMs, requireHtml ? { Accept: HTML_ACCEPT } : {});
+
+  if (!res.ok) {
+    return discardAndThrow(res, `HTTP ${res.status} fetching ${url}`);
+  }
+
+  if (requireHtml) {
+    const type = res.headers.get('content-type') ?? '';
+    if (type && !/html|xml/i.test(type)) {
+      return discardAndThrow(res, `Unexpected content type "${type}" at ${url}`);
+    }
+  }
+
+  if (Number(res.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) {
+    return discardAndThrow(res, `Response too large at ${url}`);
+  }
+
+  const text = await res.text();
+  if (text.length > MAX_BODY_BYTES) {
+    throw new Error(`Response too large at ${url}`);
+  }
+  return text;
+}
+
+// ---------------------------------------------------------------------------
+// Official llms.txt detection
+// ---------------------------------------------------------------------------
+
+// Fetch a candidate llms file; returns null unless it looks like markdown.
+async function tryFetchLlmsFile(url: string): Promise<string | null> {
   try {
-    return new URL(urlA).origin === new URL(urlB).origin;
+    const text = await fetchText(url, { timeoutMs: LLMS_FILE_TIMEOUT_MS });
+    return text.trim().startsWith('#') ? text : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
 // Check if the site already has an official llms.txt.
-export async function checkExistingLlmsTxt(
-  websiteUrl: string
-): Promise<{ llmsTxt: string; llmsFullTxt?: string } | null> {
+export async function checkExistingLlmsTxt(websiteUrl: string): Promise<OfficialFiles | null> {
+  let parsed: URL;
   try {
-    const parsed = new URL(websiteUrl);
-    const candidatePaths: string[] = [];
-
-    // Check subpath first (e.g. /docs/llms.txt), then root (/llms.txt).
-    const cleanPath = parsed.pathname.replace(/\/+$/, '');
-    if (cleanPath && cleanPath !== '') {
-      candidatePaths.push(`${parsed.origin}${cleanPath}/llms.txt`);
-    }
-    candidatePaths.push(`${parsed.origin}/llms.txt`);
-
-    for (const candidate of candidatePaths) {
-      try {
-        const res = await fetch(candidate, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
-          },
-        });
-
-        if (res.ok) {
-          const text = await res.text();
-          if (text && text.trim().startsWith('#')) {
-            // Also check for matching llms-full.txt.
-            const fullTxtUrl = candidate.replace(/llms\.txt$/, 'llms-full.txt');
-            let llmsFullTxt: string | undefined;
-
-            try {
-              const fullRes = await fetch(fullTxtUrl);
-              if (fullRes.ok) {
-                llmsFullTxt = await fullRes.text();
-              }
-            } catch {
-              // Ignore if llms-full.txt does not exist.
-            }
-
-            return { llmsTxt: text, llmsFullTxt };
-          }
-        }
-      } catch {
-        // Try next candidate path.
-      }
-    }
+    parsed = new URL(websiteUrl);
   } catch {
-    // Ignore invalid URL.
-  }
-  return null;
-}
-
-// Clean raw HTML and convert it to clean Markdown.
-function extractArticleAndMarkdown(
-  html: string,
-  pageUrl: string
-): {
-  title: string;
-  description: string;
-  textContent: string;
-  markdownContent: string;
-} {
-  const dom = new JSDOM(html, { url: pageUrl });
-  const document = dom.window.document;
-
-  const reader = new Readability(document);
-  const article = reader.parse();
-
-  // Look for meta description tag if excerpt is empty.
-  const metaDesc =
-    document.querySelector('meta[name="description"]')?.getAttribute('content') ||
-    document.querySelector('meta[property="og:description"]')?.getAttribute('content') ||
-    '';
-
-  let rawTitle = (article?.title || document.title || 'Untitled').trim();
-  const brand = getBrandNameFromUrl(pageUrl);
-
-  // Replace generic titles like "Home" or "Docs" with brand name.
-  const genericTitles = ['home', 'index', 'welcome', 'untitled', 'docs', 'documentation'];
-  if (genericTitles.includes(rawTitle.toLowerCase()) && brand) {
-    rawTitle = `${brand} Documentation`;
+    return null;
   }
 
-  const description = (article?.excerpt || metaDesc || '').trim();
-  const textContent = (article?.textContent || document.body?.textContent || '').trim();
-
-  // Convert cleaned HTML into Markdown.
-  const contentHtml = article?.content || document.body?.innerHTML || '';
-  const markdownContent = NodeHtmlMarkdown.translate(contentHtml).trim();
-
-  return {
-    title: rawTitle,
-    description,
-    textContent,
-    markdownContent,
-  };
-}
-
-// Collect unique internal documentation links from page navigation.
-export function extractInternalLinks(
-  html: string,
-  baseUrl: string,
-  maxLinks: number = 25
-): Array<{ title: string; href: string }> {
-  const dom = new JSDOM(html, { url: baseUrl });
-  const document = dom.window.document;
-
-  const links: Array<{ title: string; href: string }> = [];
-  const visitedUrls = new Set<string>();
-
-  // Do not link back to base URL.
-  visitedUrls.add(baseUrl);
-  visitedUrls.add(baseUrl.replace(/\/+$/, ''));
-
-  // Prioritize sidebar navigation links first.
-  const navElements = document.querySelectorAll(
-    'nav a, aside a, [role="navigation"] a, [aria-label*="nav"] a, .sidebar a, .menu a'
-  );
-  const allAnchors =
-    navElements.length > 0
-      ? Array.from(navElements)
-      : Array.from(document.querySelectorAll('a'));
-
-  // Pages to ignore.
-  const excludedPatterns = [
-    '/login',
-    '/signin',
-    '/signup',
-    '/careers',
-    '/terms',
-    '/privacy',
-    '/contact',
-    '/pricing',
+  // Check subpath first (e.g. /docs/llms.txt), then root (/llms.txt).
+  const basePath = parsed.pathname.replace(/\/+$/, '');
+  const candidates = [
+    ...(basePath ? [`${parsed.origin}${basePath}/llms.txt`] : []),
+    `${parsed.origin}/llms.txt`,
   ];
 
-  for (const anchor of allAnchors) {
-    if (links.length >= maxLinks) {
-      break;
-    }
+  for (const candidate of candidates) {
+    const llmsTxt = await tryFetchLlmsFile(candidate);
+    if (!llmsTxt) continue;
 
-    const rawHref = anchor.getAttribute('href');
-    const label = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
-
-    if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) {
-      continue;
-    }
-
-    try {
-      const fullUrl = new URL(rawHref, baseUrl).href;
-      const cleanUrl = fullUrl.split('#')[0];
-      const pathname = new URL(cleanUrl).pathname.toLowerCase();
-
-      const isExcluded = excludedPatterns.some((pattern) => pathname.includes(pattern));
-
-      // Keep only unvisited internal links.
-      if (
-        isSameOrigin(cleanUrl, baseUrl) &&
-        !visitedUrls.has(cleanUrl) &&
-        label.length > 1 &&
-        !isExcluded
-      ) {
-        visitedUrls.add(cleanUrl);
-        links.push({
-          title: label,
-          href: cleanUrl,
-        });
-      }
-    } catch {
-      // Ignore malformed URL.
-    }
+    const llmsFullTxt = await tryFetchLlmsFile(candidate.replace(/llms\.txt$/, 'llms-full.txt'));
+    return { llmsTxt, llmsFullTxt: llmsFullTxt ?? undefined };
   }
-
-  return links;
+  return null;
 }
 
 // Extract title and description directly from an official llms.txt document.
@@ -249,229 +221,283 @@ function parseMetadataFromOfficialLlmsTxt(
   llmsTxt: string,
   fallbackUrl: string
 ): { title: string; description: string } {
-  const lines = llmsTxt.split(/\r?\n/);
-  let title = '';
-  let description = '';
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!title && trimmed.startsWith('# ')) {
-      title = trimmed.slice(2).trim();
-    } else if (!description && trimmed.startsWith('>')) {
-      description = trimmed.replace(/^>+\s*/, '').trim();
-    }
-    if (title && description) break;
-  }
+  const lines = llmsTxt.split(/\r?\n/).map((l) => l.trim());
+  const title = lines.find((l) => l.startsWith('# '))?.slice(2).trim() ?? '';
+  const description = lines.find((l) => l.startsWith('>'))?.replace(/^>+\s*/, '').trim() ?? '';
   const brand = getBrandNameFromUrl(fallbackUrl);
+
   return {
     title: title || (brand ? `${brand} Documentation` : 'Documentation'),
     description:
-      description || `Official technical documentation and guides for ${title || brand || fallbackUrl}.`,
+      description ||
+      `Official technical documentation and guides for ${title || brand || fallbackUrl}.`,
   };
 }
 
-// Fetch raw HTML using standard HTTP fetch when headless Chromium is unavailable.
-async function fetchHtmlWithTimeout(url: string, timeoutMs: number = 15000): Promise<string> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+// Build a ScrapedPage straight from official files, no crawling needed.
+function buildOfficialPage(websiteUrl: string, files: Required<OfficialFiles>): ScrapedPage {
+  const meta = parseMetadataFromOfficialLlmsTxt(files.llmsTxt, websiteUrl);
+  return {
+    url: websiteUrl,
+    title: meta.title,
+    description: meta.description,
+    links: [{ title: meta.title, href: websiteUrl }],
+    textContent: files.llmsTxt,
+    markdownContent: files.llmsTxt,
+    subPages: [],
+    officialLlmsTxt: files.llmsTxt,
+    officialLlmsFullTxt: files.llmsFullTxt,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// HTML extraction
+// ---------------------------------------------------------------------------
+
+// Clean raw HTML and convert it to clean Markdown.
+function extractArticleAndMarkdown(
+  html: string,
+  pageUrl: string
+): { title: string; description: string; textContent: string; markdownContent: string } {
+  const dom = new JSDOM(html, { url: pageUrl });
   try {
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      },
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} fetching ${url}`);
+    const document = dom.window.document;
+
+    // Readability mutates the document it parses, so give it a clone and keep
+    // the original intact for the fallbacks below.
+    const article = new Readability(document.cloneNode(true) as Document).parse();
+
+    const metaDesc =
+      document.querySelector('meta[name="description"]')?.getAttribute('content') ||
+      document.querySelector('meta[property="og:description"]')?.getAttribute('content') ||
+      '';
+
+    let title = (article?.title || document.title || 'Untitled').trim();
+    const brand = getBrandNameFromUrl(pageUrl);
+
+    // Replace generic titles like "Home" or "Docs" with the brand name.
+    if (brand && GENERIC_TITLES.includes(title.toLowerCase())) {
+      title = `${brand} Documentation`;
     }
-    return await res.text();
+
+    const contentHtml = article?.content || document.body?.innerHTML || '';
+
+    return {
+      title,
+      description: (article?.excerpt || metaDesc).trim(),
+      textContent: (article?.textContent || document.body?.textContent || '').trim(),
+      markdownContent: NodeHtmlMarkdown.translate(contentHtml).trim(),
+    };
   } finally {
-    clearTimeout(timer);
+    dom.window.close();
   }
 }
+
+// Collect unique internal documentation links from page navigation.
+export function extractInternalLinks(
+  html: string,
+  baseUrl: string,
+  maxLinks: number = MAX_LINKS
+): ScrapedLink[] {
+  const dom = new JSDOM(html, { url: baseUrl });
+  try {
+    const document = dom.window.document;
+    const base = new URL(baseUrl);
+
+    // Seed with the base URL so we never link back to it.
+    const seen = new Set([dedupeKey(base)]);
+    const links: ScrapedLink[] = [];
+
+    const navAnchors = Array.from(document.querySelectorAll(NAV_SELECTOR));
+    const anchors = navAnchors.length > 0 ? navAnchors : Array.from(document.querySelectorAll('a'));
+
+    for (const anchor of anchors) {
+      if (links.length >= maxLinks) break;
+
+      const rawHref = anchor.getAttribute('href');
+      const title = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) continue;
+      if (title.length <= 1) continue;
+
+      let url: URL;
+      try {
+        url = new URL(rawHref, base);
+      } catch {
+        continue; // Malformed URL.
+      }
+      url.hash = '';
+
+      const key = dedupeKey(url);
+      const pathname = url.pathname.toLowerCase();
+      if (url.origin !== base.origin || seen.has(key)) continue;
+      if (EXCLUDED_PATHS.some((pattern) => pathname.includes(pattern))) continue;
+
+      seen.add(key);
+      links.push({ title, href: url.href });
+    }
+
+    return links;
+  } finally {
+    dom.window.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Crawling
+// ---------------------------------------------------------------------------
 
 // Execute async mapping with bounded concurrency.
 async function pMap<T, R>(
   items: T[],
   mapper: (item: T, index: number) => Promise<R>,
-  concurrency: number = 5
+  concurrency: number = SUBPAGE_CONCURRENCY
 ): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let nextIndex = 0;
 
   async function worker(): Promise<void> {
     while (nextIndex < items.length) {
-      const currentIndex = nextIndex++;
-      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+      const index = nextIndex++;
+      results[index] = await mapper(items[index], index);
     }
   }
 
-  const workers = Array.from(
-    { length: Math.min(concurrency, items.length) },
-    () => worker()
-  );
-  await Promise.all(workers);
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
   return results;
 }
 
-// Fetch subpages with bounded concurrency, creating fallback placeholders for failed pages.
-async function fetchSubpagesParallel(
-  links: Array<{ title: string; href: string }>,
-  websiteUrl: string,
-  maxSubpages: number = 20,
-  concurrency: number = 5
-): Promise<ScrapedSubPage[]> {
-  const cleanBase = websiteUrl.replace(/\/+$/, '');
-  const subpagesToFetch = links
-    .filter((link) => {
-      const cleanHref = link.href.replace(/\/+$/, '');
-      return cleanHref !== cleanBase;
-    })
-    .slice(0, maxSubpages);
-
-  return pMap(
-    subpagesToFetch,
-    async (link) => {
-      try {
-        const subHtml = await fetchHtmlWithTimeout(link.href, 8000);
-        const subExtracted = extractArticleAndMarkdown(subHtml, link.href);
-        return {
-          url: link.href,
-          title: subExtracted.title || link.title,
-          description: subExtracted.description,
-          markdownContent: subExtracted.markdownContent,
-        };
-      } catch (err) {
-        logWarn(`Failed to fetch subpage ${link.href}:`, err);
-        const reason = err instanceof Error ? err.message : String(err);
-        return {
-          url: link.href,
-          title: link.title,
-          description: '',
-          markdownContent: `*[Content could not be automatically retrieved (${reason})]*`,
-        };
-      }
-    },
-    concurrency
-  );
+// Fetch subpages with bounded concurrency, using a placeholder for failed pages.
+async function fetchSubpages(links: ScrapedLink[]): Promise<ScrapedSubPage[]> {
+  return pMap(links.slice(0, MAX_SUBPAGES), async (link) => {
+    try {
+      const html = await fetchText(link.href, {
+        timeoutMs: SUBPAGE_TIMEOUT_MS,
+        requireHtml: true,
+      });
+      const extracted = extractArticleAndMarkdown(html, link.href);
+      return {
+        url: link.href,
+        title: extracted.title || link.title,
+        description: extracted.description,
+        markdownContent: extracted.markdownContent,
+      };
+    } catch (err) {
+      logWarn(`Failed to fetch subpage ${link.href}:`, err);
+      const reason = err instanceof Error ? err.message : String(err);
+      return {
+        url: link.href,
+        title: link.title,
+        description: '',
+        markdownContent: `*[Content could not be automatically retrieved (${reason})]*`,
+      };
+    }
+  });
 }
 
-// Lightweight HTTP + JSDOM scraper fallback when Playwright browser cannot launch.
-async function scrapeWebsiteWithFetch(
-  websiteUrl: string,
-  officialFiles: { llmsTxt: string; llmsFullTxt?: string } | null
-): Promise<ScrapedPage> {
-  const mainHtml = await fetchHtmlWithTimeout(websiteUrl, 20000);
-  const mainExtracted = extractArticleAndMarkdown(mainHtml, websiteUrl);
-  const links = extractInternalLinks(mainHtml, websiteUrl, 25);
+// ---------------------------------------------------------------------------
+// Fetching the main page
+// ---------------------------------------------------------------------------
 
-  if (links.length === 0) {
-    links.push({
-      title: mainExtracted.title || 'Documentation Overview',
-      href: websiteUrl,
-    });
+// Block browser requests (including subresources and redirects) to private hosts.
+async function blockPrivateRequests(context: BrowserContext): Promise<void> {
+  const verdicts = new Map<string, Promise<boolean>>();
+
+  await context.route('**/*', async (route) => {
+    const url = route.request().url();
+    if (!/^https?:/i.test(url)) return route.continue(); // data:, blob:, etc.
+
+    const origin = new URL(url).origin;
+    let allowed = verdicts.get(origin);
+    if (!allowed) {
+      allowed = validatePublicUrl(url).then(
+        (r) => r.valid,
+        () => false
+      );
+      verdicts.set(origin, allowed);
+    }
+
+    return (await allowed) ? route.continue() : route.abort('blockedbyclient');
+  });
+}
+
+// Render the page in headless Chromium so client-side JavaScript runs.
+async function getHtmlWithBrowser(url: string): Promise<string> {
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+  });
+
+  try {
+    const context = await browser.newContext({ userAgent: USER_AGENT });
+    await blockPrivateRequests(context);
+
+    const page = await context.newPage();
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+
+    // Wait briefly for client-side JavaScript; ignore networkidle timeouts.
+    await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => { });
+
+    return await page.content();
+  } finally {
+    await browser.close();
   }
+}
 
-  const subPages = await fetchSubpagesParallel(links, websiteUrl, 20, 5);
+// Everything after we have the main page's HTML (same for browser and fetch).
+async function buildScrapedPage(
+  websiteUrl: string,
+  mainHtml: string,
+  officialFiles: OfficialFiles | null
+): Promise<ScrapedPage> {
+  const main = extractArticleAndMarkdown(mainHtml, websiteUrl);
+  const links = extractInternalLinks(mainHtml, websiteUrl);
+
+  // Fetch subpages for llms-full.txt. With no links found, list the main page
+  // itself so llms.txt still has an entry, and skip the crawl.
+  const subPages = links.length > 0 ? await fetchSubpages(links) : [];
+  if (links.length === 0) {
+    links.push({ title: main.title || 'Documentation Overview', href: websiteUrl });
+  }
 
   return {
     url: websiteUrl,
-    title: mainExtracted.title,
-    description: mainExtracted.description,
+    title: main.title,
+    description: main.description,
     links,
-    textContent: mainExtracted.textContent,
-    markdownContent: mainExtracted.markdownContent,
+    textContent: main.textContent,
+    markdownContent: main.markdownContent,
     subPages,
     officialLlmsTxt: officialFiles?.llmsTxt,
     officialLlmsFullTxt: officialFiles?.llmsFullTxt,
   };
 }
 
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
 // Fetch and parse a website into structured page data.
 export async function scrapeWebsite(rawWebsiteUrl: string): Promise<ScrapedPage> {
   const websiteUrl = normalizeUrl(rawWebsiteUrl);
 
-  // SSRF guard: ensure URL is public and does not point to internal resources or metadata
+  // SSRF guard: ensure the URL is public and not an internal/metadata address.
   const check = await validatePublicUrl(websiteUrl);
   if (!check.valid) {
     throw new Error(`SSRF blocked: ${check.error}`);
   }
 
-  // Check if site already has an official llms.txt.
   const officialFiles = await checkExistingLlmsTxt(websiteUrl);
 
-  // Fast-path: if both official llms.txt and llms-full.txt exist, return immediately without launching Chromium.
-  if (officialFiles?.llmsTxt && officialFiles?.llmsFullTxt) {
-    const meta = parseMetadataFromOfficialLlmsTxt(officialFiles.llmsTxt, websiteUrl);
-    return {
-      url: websiteUrl,
-      title: meta.title,
-      description: meta.description,
-      links: [{ title: meta.title, href: websiteUrl }],
-      textContent: officialFiles.llmsTxt,
-      markdownContent: officialFiles.llmsTxt,
-      subPages: [],
-      officialLlmsTxt: officialFiles.llmsTxt,
-      officialLlmsFullTxt: officialFiles.llmsFullTxt,
-    };
+  // Fast path: both official files exist, so no browser or crawl is needed.
+  if (officialFiles?.llmsFullTxt) {
+    return buildOfficialPage(websiteUrl, officialFiles as Required<OfficialFiles>);
   }
 
-  // Launch headless browser with container-friendly flags, falling back to HTTP fetch if unavailable.
-  let browser: Browser | null = null;
-  try {
-    browser = await chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
-    });
-  } catch {
-    return scrapeWebsiteWithFetch(websiteUrl, officialFiles);
-  }
+  // Prefer a real browser; fall back to plain HTTP if it can't launch or load.
+  const mainHtml = await getHtmlWithBrowser(websiteUrl).catch((err) => {
+    logWarn('Browser scrape failed, falling back to HTTP fetch:', err);
+    return fetchText(websiteUrl, { timeoutMs: MAIN_PAGE_TIMEOUT_MS, requireHtml: true });
+  });
 
-  try {
-    const context = await browser.newContext({
-      userAgent:
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    });
-    const page = await context.newPage();
-
-    // Load main page.
-    await page.goto(websiteUrl, {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000,
-    });
-
-    // Wait briefly for client-side JavaScript.
-    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
-      // Ignore networkidle timeout.
-    });
-
-    const mainHtml = await page.content();
-    const mainExtracted = extractArticleAndMarkdown(mainHtml, websiteUrl);
-    const links = extractInternalLinks(mainHtml, websiteUrl, 25);
-
-    if (links.length === 0) {
-      links.push({
-        title: mainExtracted.title || 'Documentation Overview',
-        href: websiteUrl,
-      });
-    }
-
-    // Fetch up to 20 subpages in parallel for llms-full.txt using fast HTTP fetch.
-    const subPages = await fetchSubpagesParallel(links, websiteUrl, 20, 5);
-
-    return {
-      url: websiteUrl,
-      title: mainExtracted.title,
-      description: mainExtracted.description,
-      links,
-      textContent: mainExtracted.textContent,
-      markdownContent: mainExtracted.markdownContent,
-      subPages,
-      officialLlmsTxt: officialFiles?.llmsTxt,
-      officialLlmsFullTxt: officialFiles?.llmsFullTxt,
-    };
-  } finally {
-    await browser.close();
-  }
+  return buildScrapedPage(websiteUrl, mainHtml, officialFiles);
 }

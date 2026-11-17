@@ -1,16 +1,29 @@
 import { logWarn } from '@llmstxt/logger';
 import { SiteCategory } from '@llmstxt/shared-types';
+import type { GoogleGenAI } from '@google/genai';
 import type { ScrapedPage } from './scraper.js';
 
 // Known category types for a website.
 export { SiteCategory };
 export const KNOWN_CATEGORIES = Object.values(SiteCategory);
 
-// Get default check interval for a site category.
+// Default re-check interval (hours) per site category.
+const INTERVAL_HOURS: Record<SiteCategory, number> = {
+  [SiteCategory.NEWS_MEDIA]: 6,
+  [SiteCategory.BLOG]: 12,
+  [SiteCategory.BLOG_ESSAYS]: 24,
+  [SiteCategory.SAAS_APPLICATION]: 48,
+  [SiteCategory.MARKETING]: 72,
+  [SiteCategory.SEARCH_ENGINE]: 72,
+  [SiteCategory.COMMUNITY_PLATFORM]: 72,
+  [SiteCategory.API_DOCS]: 168,
+  [SiteCategory.TECHNICAL_DOCS]: 168,
+  [SiteCategory.GOVERNMENT_PORTAL]: 168,
+  [SiteCategory.STANDARDS_SPECIFICATION]: 336,
+};
+
 export function getInitialIntervalForCategory(category: SiteCategory): number {
-  if (category === SiteCategory.BLOG) return 12;
-  if (category === SiteCategory.MARKETING) return 72;
-  return 168; // api_docs default
+  return INTERVAL_HOURS[category];
 }
 
 // Generated llms.txt and llms-full.txt file contents.
@@ -42,221 +55,212 @@ export interface CategorizationResult {
   siteCategory?: SiteCategory;
 }
 
+const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+const TITLE_SEPARATORS = [' | ', ' - ', ' — ', ' – ', ' · '];
+const NOT_COMPILED_NOTE = '(Not compiled into llms-full.txt)';
+
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
+
+const hasAny = (text: string, words: string[]) => words.some((w) => text.includes(w));
+
+const normalizeUrl = (url: string) => url.toLowerCase().replace(/\/+$/, '');
+
+const isOptionalSection = (name: string) => {
+  const n = name.toLowerCase();
+  return n === 'optional' || n.includes('additional');
+};
+
+function getCrawledUrlSet(scraped: ScrapedPage): Set<string> {
+  return new Set([scraped.url, ...(scraped.subPages ?? []).map((s) => s.url)].map(normalizeUrl));
+}
+
+// Add links to the existing Optional section, or create one.
+function appendToOptional(sections: CategorizedSection[], links: SectionLink[]): void {
+  if (links.length === 0) return;
+  const existing = sections.find((s) => isOptionalSection(s.name));
+  if (existing) existing.links.push(...links);
+  else sections.push({ name: 'Optional', links });
+}
+
+function markNotCompiled(link: SectionLink): SectionLink {
+  const desc = link.description || `Documentation for ${link.title}`;
+  return {
+    ...link,
+    description: desc.includes(NOT_COMPILED_NOTE) ? desc : `${desc} ${NOT_COMPILED_NOTE}`.trim(),
+  };
+}
+
 // Remove tagline suffixes (e.g. "MyTool | Fast Library" -> "MyTool").
 export function cleanProjectTitle(rawTitle: string): string {
-  let title = (rawTitle || '').trim();
+  const title = (rawTitle || '').trim();
+  const sep = TITLE_SEPARATORS.find((s) => title.includes(s));
+  if (!sep) return title || 'Documentation';
 
-  const separators = [' | ', ' - ', ' — ', ' – ', ' · '];
-  for (const sep of separators) {
-    if (title.includes(sep)) {
-      const parts = title.split(sep);
-      if (parts[0].trim().toLowerCase() === 'home' && parts.length > 1) {
-        title = parts[1].trim();
-      } else if (parts[0].trim().length > 0) {
-        title = parts[0].trim();
-      }
-    }
-  }
-
-  return title || 'Documentation';
+  const [first, second] = title.split(sep).map((p) => p.trim());
+  const picked = first.toLowerCase() === 'home' && second ? second : first;
+  return picked || title || 'Documentation';
 }
+
+// ---------------------------------------------------------------------------
+// Rule-based categorization
+// ---------------------------------------------------------------------------
 
 // Choose a section name based on URL keywords.
 function getSectionNameFromUrl(url: string, title: string): string {
   const lowerUrl = url.toLowerCase();
   const lowerTitle = title.toLowerCase();
 
-  if (lowerUrl.includes('api') || lowerTitle.includes('api') || lowerUrl.includes('ref')) {
+  if (hasAny(lowerUrl, ['api', 'ref']) || lowerTitle.includes('api')) {
     return 'API Reference';
   }
   if (
-    lowerUrl.includes('doc') ||
-    lowerTitle.includes('doc') ||
-    lowerUrl.includes('guide') ||
-    lowerUrl.includes('tutorial') ||
-    lowerUrl.includes('getting-started') ||
-    lowerUrl.includes('quickstart')
+    hasAny(lowerUrl, ['doc', 'guide', 'tutorial', 'getting-started', 'quickstart']) ||
+    lowerTitle.includes('doc')
   ) {
     return 'Docs';
   }
-  if (
-    lowerUrl.includes('community') ||
-    lowerUrl.includes('discord') ||
-    lowerUrl.includes('blog') ||
-    lowerUrl.includes('changelog') ||
-    lowerUrl.includes('release')
-  ) {
+  if (hasAny(lowerUrl, ['community', 'discord', 'blog', 'changelog', 'release'])) {
     return 'Optional';
   }
 
   try {
-    const pathname = new URL(url).pathname;
-    const segments = pathname.split('/').filter((s) => s.length > 0);
-    if (segments.length >= 1) {
-      const seg = segments[0];
-      return seg.charAt(0).toUpperCase() + seg.slice(1);
-    }
+    const [first] = new URL(url).pathname.split('/').filter(Boolean);
+    if (first) return first.charAt(0).toUpperCase() + first.slice(1);
   } catch {
-    // Ignore error.
+    // Ignore invalid URLs.
   }
   return 'Docs';
 }
 
-// Group links into sections without AI.
-function categorizeWithFallback(scraped: ScrapedPage): CategorizationResult {
-  const crawledUrls = new Set(
-    [scraped.url, ...(scraped.subPages || []).map((s) => s.url)].map((u) =>
-      u.toLowerCase().replace(/\/+$/, '')
-    )
-  );
+function detectSiteCategory(scraped: ScrapedPage): SiteCategory {
+  const url = scraped.url.toLowerCase();
+  const title = scraped.title.toLowerCase();
 
-  const sectionMap = new Map<string, SectionLink[]>();
-  const uncrawledLinks: SectionLink[] = [];
-
-  for (const link of scraped.links) {
-    const cleanUrl = link.href.toLowerCase().replace(/\/+$/, '');
-    const isCrawled = crawledUrls.has(cleanUrl);
-
-    if (isCrawled || !scraped.subPages || scraped.subPages.length === 0) {
-      const sectionName = getSectionNameFromUrl(link.href, link.title);
-      const item: SectionLink = {
-        title: link.title,
-        url: link.href,
-        description: `Guides, reference, and implementation details for ${link.title}.`,
-      };
-
-      if (!sectionMap.has(sectionName)) {
-        sectionMap.set(sectionName, []);
-      }
-      sectionMap.get(sectionName)!.push(item);
-    } else {
-      uncrawledLinks.push({
-        title: link.title,
-        url: link.href,
-        description: `Reference documentation for ${link.title} (Not compiled into llms-full.txt).`,
-      });
-    }
+  // Government portals
+  if (url.includes('.gov.') || url.includes('.gov/') || url.endsWith('.gov') || hasAny(url, ['service.gov.uk', 'gov.uk'])) {
+    return SiteCategory.GOVERNMENT_PORTAL;
   }
 
-  const sections: CategorizedSection[] = [];
-  for (const [name, links] of sectionMap.entries()) {
-    sections.push({ name, links });
+  // News and media outlets
+  if (hasAny(url, ['nytimes.com', 'bbc.com', 'news', 'reuters.com', 'cnn.com', 'theguardian.com'])) {
+    return SiteCategory.NEWS_MEDIA;
   }
 
-  if (uncrawledLinks.length > 0) {
-    const existingOptional = sections.find(
-      (s) => s.name.toLowerCase() === 'optional' || s.name.toLowerCase().includes('additional')
-    );
-    if (existingOptional) {
-      existingOptional.links.push(...uncrawledLinks);
-    } else {
-      sections.push({
-        name: 'Optional',
-        links: uncrawledLinks,
-      });
-    }
+  // Web and technical standards specifications
+  if (hasAny(url, ['w3.org', 'llmstxt.org', 'spec', 'rfc-editor.org', 'tc39.es'])) {
+    return SiteCategory.STANDARDS_SPECIFICATION;
   }
 
-  const lowerUrl = scraped.url.toLowerCase();
-  const lowerTitle = scraped.title.toLowerCase();
-  let siteCategory: SiteCategory = SiteCategory.API_DOCS;
-  if (lowerUrl.includes('blog') || lowerTitle.includes('blog') || lowerUrl.includes('changelog')) {
-    siteCategory = SiteCategory.BLOG;
-  } else if (!lowerUrl.includes('doc') && !lowerTitle.includes('doc') && !lowerUrl.includes('api')) {
-    siteCategory = SiteCategory.MARKETING;
+  // Search engines
+  if (hasAny(url, ['ecosia.org', 'google.com', 'duckduckgo.com', 'bing.com'])) {
+    return SiteCategory.SEARCH_ENGINE;
   }
 
-  const siteDescription =
-    scraped.description ||
-    `Official technical documentation and developer guides for ${cleanProjectTitle(scraped.title)}.`;
+  // SaaS and web applications
+  if (hasAny(url, ['trello.com', 'app.', 'dashboard', 'console', 'linear.app', 'slack.com'])) {
+    return SiteCategory.SAAS_APPLICATION;
+  }
 
-  return {
-    title: cleanProjectTitle(scraped.title),
-    siteDescription,
-    sections,
-    siteCategory,
-  };
+  // Personal essays & blogs
+  if (hasAny(url, ['paulgraham.com', 'essays', 'article', 'newsletter'])) {
+    return SiteCategory.BLOG_ESSAYS;
+  }
+
+  // API Documentation
+  if (
+    hasAny(url, ['api', 'reference', 'swagger', 'endpoint']) ||
+    title.includes('api') ||
+    scraped.links?.some((l) => hasAny(l.href.toLowerCase(), ['api', 'endpoint']))
+  ) {
+    return SiteCategory.API_DOCS;
+  }
+
+  // Technical documentation and developer references
+  if (
+    hasAny(url, ['developer.mozilla.org', 'docs.python.org', 'python.org', 'docker.com']) ||
+    hasAny(url, ['docs', 'documentation', 'guide'])
+  ) {
+    return SiteCategory.TECHNICAL_DOCS;
+  }
+
+  // Community platforms
+  if (hasAny(url, ['huggingface.co', 'github.com', 'community'])) {
+    return SiteCategory.COMMUNITY_PLATFORM;
+  }
+
+  if (!hasAny(url, ['doc', 'api', 'reference', 'spec', 'manual']) && !title.includes('doc')) {
+    return SiteCategory.MARKETING;
+  }
+
+  return SiteCategory.API_DOCS;
 }
 
-// Align categorized sections with crawled subpages, ensuring uncrawled links are marked and placed in Optional.
+// Keep crawled links in their sections; move everything else into Optional
+// with a note that it is not part of llms-full.txt.
 function alignSectionsWithCrawledPages(
   sections: CategorizedSection[],
   scraped: ScrapedPage
 ): CategorizedSection[] {
-  if (!scraped.subPages || scraped.subPages.length === 0) {
-    return sections;
-  }
+  if (!scraped.subPages?.length) return sections;
 
-  const crawledUrls = new Set(
-    [scraped.url, ...scraped.subPages.map((s) => s.url)].map((u) =>
-      u.toLowerCase().replace(/\/+$/, '')
-    )
-  );
+  const crawled = getCrawledUrlSet(scraped);
+  const primary: CategorizedSection[] = [];
+  const uncrawled: SectionLink[] = [];
 
-  const primarySections: CategorizedSection[] = [];
-  const uncrawledLinks: SectionLink[] = [];
+  for (const section of sections) {
+    const optional = isOptionalSection(section.name);
+    const compiled: SectionLink[] = [];
 
-  for (const sec of sections) {
-    const isExplicitOptional =
-      sec.name.toLowerCase() === 'optional' || sec.name.toLowerCase().includes('additional');
-
-    const compiledLinks: SectionLink[] = [];
-    for (const link of sec.links) {
-      const cleanUrl = link.url.toLowerCase().replace(/\/+$/, '');
-      if (crawledUrls.has(cleanUrl) && !isExplicitOptional) {
-        compiledLinks.push(link);
-      } else {
-        const note = '(Not compiled into llms-full.txt)';
-        const desc = link.description || `Documentation for ${link.title}`;
-        uncrawledLinks.push({
-          ...link,
-          description: desc.includes(note) ? desc : `${desc} ${note}`.trim(),
-        });
-      }
+    for (const link of section.links) {
+      if (!optional && crawled.has(normalizeUrl(link.url))) compiled.push(link);
+      else uncrawled.push(markNotCompiled(link));
     }
 
-    if (compiledLinks.length > 0) {
-      primarySections.push({ name: sec.name, links: compiledLinks });
-    }
+    if (compiled.length > 0) primary.push({ name: section.name, links: compiled });
   }
 
-  if (uncrawledLinks.length > 0) {
-    const existingOptional = primarySections.find(
-      (s) => s.name.toLowerCase() === 'optional' || s.name.toLowerCase().includes('additional')
-    );
-    if (existingOptional) {
-      existingOptional.links.push(...uncrawledLinks);
-    } else {
-      primarySections.push({
-        name: 'Optional',
-        links: uncrawledLinks,
-      });
-    }
-  }
-
-  return primarySections;
+  appendToOptional(primary, uncrawled);
+  return primary;
 }
 
-// Use Gemini to group links and write 1-sentence summaries.
-async function categorizeWithGemini(
-  scraped: ScrapedPage
-): Promise<CategorizationResult> {
-  const apiKey = process.env.GEMINI_API_KEY;
+// Group links into sections without AI.
+function categorizeWithFallback(scraped: ScrapedPage): CategorizationResult {
+  const sectionMap = new Map<string, SectionLink[]>();
 
-  if (!apiKey) {
-    return categorizeWithFallback(scraped);
-  }
-
-  try {
-    const { GoogleGenAI } = await import('@google/genai');
-    const ai = new GoogleGenAI({ apiKey });
-
-    const linkItems = scraped.links.map((link) => ({
+  for (const link of scraped.links) {
+    const name = getSectionNameFromUrl(link.href, link.title);
+    const items = sectionMap.get(name) ?? [];
+    items.push({
       title: link.title,
       url: link.href,
-    }));
+      description: `Guides, reference, and implementation details for ${link.title}.`,
+    });
+    sectionMap.set(name, items);
+  }
 
-    const prompt = `You are an expert at creating strictly standard-compliant llms.txt files according to the specification at https://llmstxt.org/.
+  const sections = [...sectionMap].map(([name, links]) => ({ name, links }));
+  const title = cleanProjectTitle(scraped.title);
+
+  return {
+    title,
+    siteDescription:
+      scraped.description ||
+      `Official technical documentation and developer guides for ${title}.`,
+    sections: alignSectionsWithCrawledPages(sections, scraped),
+    siteCategory: detectSiteCategory(scraped),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Gemini categorization
+// ---------------------------------------------------------------------------
+
+function buildCategorizationPrompt(scraped: ScrapedPage): string {
+  const linkItems = scraped.links.map((link) => ({ title: link.title, url: link.href }));
+
+  return `You are an expert at creating strictly standard-compliant llms.txt files according to the specification at https://llmstxt.org/.
 
 Website Information:
 - Page Title: "${scraped.title}"
@@ -269,7 +273,7 @@ Specification Rules:
 2. "siteDescription": A concise 1-2 sentence summary of what the project/site is and who it is for.
 3. "preamble": Optional 1-sentence note for LLMs on navigating the docs.
 4. "sections": Group links into clear H2 categories (e.g. "Docs", "API Reference", "Guides", or product areas).
-5. "siteCategory": Classify the website type as exactly one of: "api_docs", "blog", or "marketing".
+5. "siteCategory": Classify the website type as exactly one of: ${KNOWN_CATEGORIES.map((c) => `"${c}"`).join(', ')}.
 6. For each link, provide:
    - "title": Clean human-readable title.
    - "url": Target URL.
@@ -294,63 +298,93 @@ Return ONLY a JSON object matching this schema:
     }
   ]
 }`;
+}
 
-    const modelCandidates = ['gemini-3.8-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
-    let responseText = '';
+// Try each candidate model until one returns text.
+async function generateWithModelFallback(ai: GoogleGenAI, prompt: string): Promise<string> {
+  for (const model of GEMINI_MODELS) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      });
+      if (response.text) return response.text.trim();
+    } catch {
+      // Try next candidate model.
+    }
+  }
+  throw new Error('No Gemini model returned a response');
+}
 
-    for (const model of modelCandidates) {
-      try {
-        const response = await ai.models.generateContent({
-          model,
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-          },
-        });
-        if (response.text) {
-          responseText = response.text.trim();
-          break;
-        }
-      } catch {
-        // Try next candidate model.
-      }
+// Validate the LLM's category; warn and default if it is unknown.
+function parseSiteCategory(raw: unknown): SiteCategory {
+  if (!raw) return SiteCategory.API_DOCS;
+
+  const normalized = String(raw).toLowerCase().trim();
+  if ((KNOWN_CATEGORIES as readonly string[]).includes(normalized)) {
+    return normalized as SiteCategory;
+  }
+
+  logWarn(
+    `[Warning] Unknown site category returned by LLM: "${String(raw)}". Defaulting to "${SiteCategory.API_DOCS}".`
+  );
+  return SiteCategory.API_DOCS;
+}
+
+// Use Gemini to group links and write 1-sentence summaries.
+// Falls back to the rule-based parser on any failure.
+async function categorizeWithGemini(scraped: ScrapedPage): Promise<CategorizationResult> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return categorizeWithFallback(scraped);
+
+  try {
+    const { GoogleGenAI } = await import('@google/genai');
+    const ai = new GoogleGenAI({ apiKey });
+
+    const text = await generateWithModelFallback(ai, buildCategorizationPrompt(scraped));
+    const parsed = JSON.parse(text) as CategorizationResult;
+    if (!Array.isArray(parsed?.sections)) {
+      throw new Error('Gemini response is missing a "sections" array');
     }
 
-    if (!responseText) {
-      return categorizeWithFallback(scraped);
-    }
-
-    const parsed = JSON.parse(responseText) as CategorizationResult;
-
-    if (parsed && Array.isArray(parsed.sections)) {
-      // Validate category; log warning if LLM returns an unknown category.
-      let category: SiteCategory = SiteCategory.API_DOCS;
-      if (parsed.siteCategory) {
-        const normalized = String(parsed.siteCategory).toLowerCase().trim();
-        if ((KNOWN_CATEGORIES as readonly string[]).includes(normalized)) {
-          category = normalized as SiteCategory;
-        } else {
-          logWarn(
-            `[Warning] Unknown site category returned by LLM: "${parsed.siteCategory}". Defaulting to "${SiteCategory.API_DOCS}".`
-          );
-          category = SiteCategory.API_DOCS;
-        }
-      }
-
-      return {
-        title: parsed.title ? cleanProjectTitle(parsed.title) : cleanProjectTitle(scraped.title),
-        siteDescription: parsed.siteDescription || scraped.description,
-        preamble: parsed.preamble,
-        sections: alignSectionsWithCrawledPages(parsed.sections, scraped),
-        siteCategory: category,
-      };
-    }
-
-    return categorizeWithFallback(scraped);
+    return {
+      title: cleanProjectTitle(parsed.title || scraped.title),
+      siteDescription: parsed.siteDescription || scraped.description,
+      preamble: parsed.preamble,
+      sections: alignSectionsWithCrawledPages(parsed.sections, scraped),
+      siteCategory: parseSiteCategory(parsed.siteCategory),
+    };
   } catch (error) {
     logWarn('Gemini categorization failed, falling back to rule-based parser:', error);
     return categorizeWithFallback(scraped);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Formatting
+// ---------------------------------------------------------------------------
+
+// "# Title" plus an optional blockquote summary.
+function formatHeader(rawTitle: string, siteDescription?: string): string {
+  let output = `# ${cleanProjectTitle(rawTitle)}\n\n`;
+
+  const description = siteDescription?.trim();
+  if (description) {
+    const quote = description
+      .split('\n')
+      .map((line) => `> ${line.trim()}`)
+      .join('\n');
+    output += `${quote}\n\n`;
+  }
+
+  return output;
+}
+
+function formatLink(link: SectionLink): string {
+  const title = (link.title || 'Untitled').replace(/[\[\]]/g, '').trim();
+  const description = link.description?.trim();
+  return `- [${title}](${link.url})${description ? `: ${description}` : ''}`;
 }
 
 // Build standard llms.txt markdown string.
@@ -360,43 +394,14 @@ export function formatLlmsTxt(
   sections: CategorizedSection[],
   preamble?: string
 ): string {
-  const title = cleanProjectTitle(rawTitle);
-  let output = `# ${title}\n\n`;
+  let output = formatHeader(rawTitle, siteDescription);
 
-  // Add blockquote summary.
-  if (siteDescription && siteDescription.trim()) {
-    const formattedQuote = siteDescription
-      .trim()
-      .split('\n')
-      .map((line) => `> ${line.trim()}`)
-      .join('\n');
-    output += `${formattedQuote}\n\n`;
-  }
+  const cleanPreamble = preamble?.replace(/^#{1,6}\s+/gm, '').trim();
+  if (cleanPreamble) output += `${cleanPreamble}\n\n`;
 
-  // Add optional preamble notes.
-  if (preamble && preamble.trim()) {
-    const cleanPreamble = preamble
-      .replace(/^#{1,6}\s+/gm, '')
-      .trim();
-    if (cleanPreamble) {
-      output += `${cleanPreamble}\n\n`;
-    }
-  }
-
-  // Add each H2 section and its links.
   for (const section of sections) {
-    if (!section.links || section.links.length === 0) continue;
-
-    output += `## ${section.name}\n\n`;
-    for (const link of section.links) {
-      const safeTitle = (link.title || 'Untitled').replace(/[\[\]]/g, '').trim();
-      if (link.description && link.description.trim()) {
-        output += `- [${safeTitle}](${link.url}): ${link.description.trim()}\n`;
-      } else {
-        output += `- [${safeTitle}](${link.url})\n`;
-      }
-    }
-    output += '\n';
+    if (!section.links?.length) continue;
+    output += `## ${section.name}\n\n${section.links.map(formatLink).join('\n')}\n\n`;
   }
 
   return output.trim() + '\n';
@@ -408,38 +413,25 @@ export function formatLlmsFullTxt(
   siteDescription: string,
   scraped: ScrapedPage
 ): string {
-  const title = cleanProjectTitle(rawTitle);
-  let output = `# ${title}\n\n`;
+  let output = formatHeader(rawTitle, siteDescription);
 
-  if (siteDescription && siteDescription.trim()) {
-    const formattedQuote = siteDescription
-      .trim()
-      .split('\n')
-      .map((line) => `> ${line.trim()}`)
-      .join('\n');
-    output += `${formattedQuote}\n\n`;
-  }
-
-  // Include main page markdown.
   if (scraped.markdownContent) {
     output += `## Overview\nURL: ${scraped.url}\n\n${scraped.markdownContent}\n\n`;
   }
 
-  // Include crawled subpages.
-  if (scraped.subPages && scraped.subPages.length > 0) {
-    for (const subPage of scraped.subPages) {
-      output += `---\n\n## ${subPage.title}\nURL: ${subPage.url}\n\n`;
-      output += `${subPage.markdownContent}\n\n`;
-    }
+  for (const page of scraped.subPages ?? []) {
+    output += `---\n\n## ${page.title}\nURL: ${page.url}\n\n${page.markdownContent}\n\n`;
   }
 
   return output.trim() + '\n';
 }
 
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
 // Build llms.txt and llms-full.txt from scraped data.
-export async function generateLlmsTxtFiles(
-  scraped: ScrapedPage
-): Promise<GeneratedLlmsFiles> {
+export async function generateLlmsTxtFiles(scraped: ScrapedPage): Promise<GeneratedLlmsFiles> {
   // Use official files directly if the site already authored them.
   if (scraped.officialLlmsTxt) {
     return {
@@ -451,27 +443,17 @@ export async function generateLlmsTxtFiles(
     };
   }
 
-  // Categorize links with Gemini or fallback.
   const categorized = await categorizeWithGemini(scraped);
   const projectTitle = categorized.title || scraped.title;
 
-  // Format llms.txt and llms-full.txt.
-  const llmsTxt = formatLlmsTxt(
-    projectTitle,
-    categorized.siteDescription,
-    categorized.sections,
-    categorized.preamble
-  );
-
-  const llmsFullTxt = formatLlmsFullTxt(
-    projectTitle,
-    categorized.siteDescription,
-    scraped
-  );
-
   return {
-    llmsTxt,
-    llmsFullTxt,
+    llmsTxt: formatLlmsTxt(
+      projectTitle,
+      categorized.siteDescription,
+      categorized.sections,
+      categorized.preamble
+    ),
+    llmsFullTxt: formatLlmsFullTxt(projectTitle, categorized.siteDescription, scraped),
     siteCategory: categorized.siteCategory || SiteCategory.API_DOCS,
   };
 }
@@ -484,4 +466,3 @@ export {
   type ValidationResult,
   type ValidationStats,
 } from './llmsValidator.js';
-

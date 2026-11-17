@@ -10,6 +10,7 @@ export async function runMigrations(): Promise<void> {
   const connectionString =
     process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/llmstxt_directory';
 
+  // Local Docker PostgreSQL has no SSL by default
   const isRemote = !connectionString.includes('localhost') && !connectionString.includes('127.0.0.1');
   const rejectUnauthorized = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false';
   console.log(`[Migrate] Connecting to database (SSL: ${isRemote})...`);
@@ -17,9 +18,9 @@ export async function runMigrations(): Promise<void> {
     connectionString,
     ssl: isRemote
       ? {
-          rejectUnauthorized,
-          ca: process.env.DATABASE_CA_CERT,
-        }
+        rejectUnauthorized,
+        ca: process.env.DATABASE_CA_CERT,
+      }
       : undefined,
   });
 

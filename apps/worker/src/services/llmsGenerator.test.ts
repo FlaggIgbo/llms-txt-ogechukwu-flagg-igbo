@@ -144,9 +144,46 @@ test('formatLlmsFullTxt: renders failure placeholders when subpages fail to craw
 });
 
 test('getInitialIntervalForCategory: returns standard seed cadence intervals', () => {
+  assert.equal(getInitialIntervalForCategory(SiteCategory.NEWS_MEDIA), 6);
   assert.equal(getInitialIntervalForCategory(SiteCategory.BLOG), 12);
+  assert.equal(getInitialIntervalForCategory(SiteCategory.BLOG_ESSAYS), 24);
+  assert.equal(getInitialIntervalForCategory(SiteCategory.SAAS_APPLICATION), 48);
   assert.equal(getInitialIntervalForCategory(SiteCategory.MARKETING), 72);
+  assert.equal(getInitialIntervalForCategory(SiteCategory.SEARCH_ENGINE), 72);
+  assert.equal(getInitialIntervalForCategory(SiteCategory.COMMUNITY_PLATFORM), 72);
   assert.equal(getInitialIntervalForCategory(SiteCategory.API_DOCS), 168);
+  assert.equal(getInitialIntervalForCategory(SiteCategory.TECHNICAL_DOCS), 168);
+  assert.equal(getInitialIntervalForCategory(SiteCategory.GOVERNMENT_PORTAL), 168);
+  assert.equal(getInitialIntervalForCategory(SiteCategory.STANDARDS_SPECIFICATION), 336);
+});
+
+test('detectSiteCategory: classifies various site architectures accurately', async () => {
+  const sites = [
+    { url: 'https://docs.python.org/3/', title: 'Python 3 Documentation', expected: SiteCategory.TECHNICAL_DOCS },
+    { url: 'https://developer.mozilla.org/en-US/', title: 'MDN Web Docs', expected: SiteCategory.TECHNICAL_DOCS },
+    { url: 'https://www.w3.org/TR/', title: 'W3C Technical Reports and Standards', expected: SiteCategory.STANDARDS_SPECIFICATION },
+    { url: 'https://www.docker.com/products/', title: 'Docker: Accelerated Container Application Development', expected: SiteCategory.TECHNICAL_DOCS },
+    { url: 'https://www.nytimes.com/', title: 'The New York Times - Breaking News', expected: SiteCategory.NEWS_MEDIA },
+    { url: 'https://www.bbc.com/news', title: 'BBC News', expected: SiteCategory.NEWS_MEDIA },
+    { url: 'https://www.service.gov.uk/', title: 'GOV.UK Public Services', expected: SiteCategory.GOVERNMENT_PORTAL },
+    { url: 'https://paulgraham.com/articles.html', title: 'Paul Graham Essays', expected: SiteCategory.BLOG_ESSAYS },
+    { url: 'https://trello.com/home', title: 'Manage Your Team Projects From Anywhere | Trello', expected: SiteCategory.SAAS_APPLICATION },
+    { url: 'https://www.ecosia.org/', title: 'Ecosia - The search engine that plants trees', expected: SiteCategory.SEARCH_ENGINE },
+  ];
+
+  for (const site of sites) {
+    const page: ScrapedPage = {
+      url: site.url,
+      title: site.title,
+      description: `Testing ${site.title}`,
+      textContent: `Content for ${site.title}`,
+      markdownContent: `# ${site.title}\n\nContent for ${site.title}`,
+      links: [{ title: 'Home', href: site.url }],
+      subPages: [],
+    };
+    const { siteCategory } = await generateLlmsTxtFiles(page);
+    assert.equal(siteCategory, site.expected, `Expected ${site.url} to be categorized as ${site.expected}`);
+  }
 });
 
 test('computeNextCadence: handles adaptive backoff correctly', () => {

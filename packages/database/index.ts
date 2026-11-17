@@ -189,6 +189,7 @@ export class DatabaseClient {
   // Create or reuse the DB connection pool.
   private getPool(): pg.Pool {
     if (!this.pool) {
+      // Local Docker PostgreSQL has no SSL by default
       const isRemote = !connectionString.includes('localhost') && !connectionString.includes('127.0.0.1');
       const rejectUnauthorized = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false';
       this.pool = new pg.Pool({
@@ -209,7 +210,7 @@ export class DatabaseClient {
   async ensureDevelopmentSeed(): Promise<void> {
     if (this.hasEnsuredSeed) return;
     const pool = this.getPool();
-    await pool.query(ENSURE_SCHEMA_SQL).catch(() => {});
+    await pool.query(ENSURE_SCHEMA_SQL).catch(() => { });
 
     for (const entry of MOCK_SEED_ENTRIES) {
       await pool.query(UPSERT_SEED_ENTRY_SQL, [
@@ -227,7 +228,7 @@ export class DatabaseClient {
     }
 
     // Recover any entries or jobs stuck in PROCESSING from a previous restart.
-    await pool.query(RECOVER_STUCK_PROCESSING_SQL).catch(() => {});
+    await pool.query(RECOVER_STUCK_PROCESSING_SQL).catch(() => { });
     this.hasEnsuredSeed = true;
   }
 

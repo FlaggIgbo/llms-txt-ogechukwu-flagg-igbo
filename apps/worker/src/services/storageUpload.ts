@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { logWarn } from '@llmstxt/logger';
 import { assertValidLlmsFiles } from './llmsValidator.js';
 
 // Upload results with storage paths.
@@ -9,194 +11,237 @@ export interface UploadResult {
   llmsFullTxtUri: string;
 }
 
-// Convert a website URL into a safe folder name.
-export function cleanUrlForFolder(url: string): string {
-  let name = url;
-  if (name.startsWith('https://')) name = name.slice(8);
-  if (name.startsWith('http://')) name = name.slice(7);
-  while (name.endsWith('/')) name = name.slice(0, -1);
-  return name.replace(/[^a-zA-Z0-9.-]/g, '_');
-}
-
-function hmacSha256(key: string | Buffer, data: string): Buffer {
-  return crypto.createHmac('sha256', key).update(data, 'utf8').digest();
-}
-
-function sha256Hex(data: string): string {
-  return crypto.createHash('sha256').update(data, 'utf8').digest('hex');
-}
-
-// Upload a single text object to Cloudflare R2 or local MinIO/S3 using AWS Signature Version 4.
-export async function putObjectToR2(params: {
-  accountId?: string;
+// Everything needed to talk to an R2 bucket.
+export interface R2Config {
+  endpoint: string; // e.g. https://<accountId>.r2.cloudflarestorage.com
+  region: string; // "auto" for Cloudflare R2
+  bucket: string;
   accessKeyId: string;
   secretAccessKey: string;
-  bucket: string;
-  key: string;
-  body: string;
-  endpoint?: string;
-}): Promise<boolean> {
-  const { accountId, accessKeyId, secretAccessKey, bucket, key, body } = params;
-  const endpoint = params.endpoint || process.env.S3_ENDPOINT;
+}
 
-  let host: string;
-  let protocol = 'https:';
+export type StorageConfig = { kind: 'local' } | ({ kind: 'r2' } & R2Config);
 
-  if (endpoint) {
-    const parsed = new URL(endpoint);
-    host = parsed.host;
-    protocol = parsed.protocol;
-  } else {
-    host = `${accountId || 'local'}.r2.cloudflarestorage.com`;
+const MAX_FOLDER_NAME_LENGTH = 200;
+const PUT_TIMEOUT_MS = 30_000;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const hmacSha256 = (key: string | Buffer, data: string): Buffer =>
+  crypto.createHmac('sha256', key).update(data, 'utf8').digest();
+
+const sha256Hex = (data: string): string =>
+  crypto.createHash('sha256').update(data, 'utf8').digest('hex');
+
+// Convert a website URL into a safe folder name.
+export function cleanUrlForFolder(url: string): string {
+  const name = url
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/+$/, '')
+    .replace(/[^a-zA-Z0-9.-]/g, '_');
+
+  // Never produce "", "." or ".." (path traversal out of the storage dir).
+  if (!name || /^\.+$/.test(name)) return `_${name || 'site'}`;
+
+  // Keep well under the 255-character filename limit.
+  if (name.length > MAX_FOLDER_NAME_LENGTH) {
+    return `${name.slice(0, MAX_FOLDER_NAME_LENGTH - 9)}-${sha256Hex(name).slice(0, 8)}`;
+  }
+  return name;
+}
+
+// RFC 3986 percent-encoding of each path segment, as SigV4 requires.
+const encodeObjectKey = (key: string): string =>
+  key
+    .split('/')
+    .map((segment) =>
+      encodeURIComponent(segment).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+    )
+    .join('/');
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+// Read storage settings from the environment once. Pure apart from the `env`
+// argument, so it can be tested without touching process.env.
+//
+//   STORAGE_PROVIDER      "local" (default) or "r2"
+//   CLOUDFLARE_ACCOUNT_ID used to build the R2 endpoint
+//   R2_ENDPOINT           optional endpoint override (e.g. a local emulator)
+//   R2_REGION             optional, defaults to "auto"
+//   R2_LLMS_TXT_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+export function resolveStorageConfig(env: NodeJS.ProcessEnv = process.env): StorageConfig {
+  const provider = (env.STORAGE_PROVIDER || 'local').trim().toLowerCase();
+  if (provider === 'local') return { kind: 'local' };
+  if (provider !== 'r2') {
+    throw new Error(`Unsupported STORAGE_PROVIDER "${provider}" (expected "local" or "r2")`);
   }
 
-  const region = endpoint ? (process.env.AWS_REGION || 'us-east-1') : 'auto';
-  const service = 's3';
+  const accountId = env.CLOUDFLARE_ACCOUNT_ID;
+  const endpoint =
+    env.R2_ENDPOINT || (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : undefined);
+  const bucket = env.R2_LLMS_TXT_BUCKET;
+  const accessKeyId = env.R2_ACCESS_KEY_ID;
+  const secretAccessKey = env.R2_SECRET_ACCESS_KEY;
 
-  const now = new Date();
-  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
-  const dateStamp = amzDate.slice(0, 8);
-  const canonicalUri = `/${bucket}/${key.replace(/^\/+/, '')}`;
-  const payloadHash = sha256Hex(body);
+  const missing: string[] = [];
+  if (!endpoint) missing.push('CLOUDFLARE_ACCOUNT_ID (or R2_ENDPOINT)');
+  if (!bucket) missing.push('R2_LLMS_TXT_BUCKET');
+  if (!accessKeyId) missing.push('R2_ACCESS_KEY_ID');
+  if (!secretAccessKey) missing.push('R2_SECRET_ACCESS_KEY');
+
+  if (!endpoint || !bucket || !accessKeyId || !secretAccessKey) {
+    throw new Error(`STORAGE_PROVIDER=r2 but missing configuration: ${missing.join(', ')}`);
+  }
+
+  return {
+    kind: 'r2',
+    endpoint,
+    region: env.R2_REGION || 'auto',
+    bucket,
+    accessKeyId,
+    secretAccessKey,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// R2 upload (AWS Signature Version 4 over the S3-compatible API)
+// ---------------------------------------------------------------------------
+
+// Upload a single text object. Throws on any failure.
+export async function putObject(config: R2Config, key: string, body: string): Promise<void> {
+  const { host, protocol } = new URL(config.endpoint);
+  const service = 's3';
+  const algorithm = 'AWS4-HMAC-SHA256';
   const contentType = 'text/plain; charset=utf-8';
 
-  const canonicalHeaders = [
-    `content-type:${contentType}`,
-    `host:${host}`,
-    `x-amz-content-sha256:${payloadHash}`,
-    `x-amz-date:${amzDate}`,
-  ].join('\n') + '\n';
+  const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+  const canonicalUri = `/${config.bucket}/${encodeObjectKey(key.replace(/^\/+/, ''))}`;
+  const payloadHash = sha256Hex(body);
 
   const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
-  const canonicalRequest = [
-    'PUT',
-    canonicalUri,
-    '',
-    canonicalHeaders,
-    signedHeaders,
-    payloadHash,
-  ].join('\n');
+  const canonicalHeaders =
+    [
+      `content-type:${contentType}`,
+      `host:${host}`,
+      `x-amz-content-sha256:${payloadHash}`,
+      `x-amz-date:${amzDate}`,
+    ].join('\n') + '\n';
 
-  const algorithm = 'AWS4-HMAC-SHA256';
-  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
-  const stringToSign = [
-    algorithm,
-    amzDate,
-    credentialScope,
-    sha256Hex(canonicalRequest),
-  ].join('\n');
+  const canonicalRequest = ['PUT', canonicalUri, '', canonicalHeaders, signedHeaders, payloadHash].join('\n');
 
-  const kDate = hmacSha256(`AWS4${secretAccessKey}`, dateStamp);
-  const kRegion = hmacSha256(kDate, region);
+  const credentialScope = `${dateStamp}/${config.region}/${service}/aws4_request`;
+  const stringToSign = [algorithm, amzDate, credentialScope, sha256Hex(canonicalRequest)].join('\n');
+
+  const kDate = hmacSha256(`AWS4${config.secretAccessKey}`, dateStamp);
+  const kRegion = hmacSha256(kDate, config.region);
   const kService = hmacSha256(kRegion, service);
   const kSigning = hmacSha256(kService, 'aws4_request');
-  const signature = crypto
-    .createHmac('sha256', kSigning)
-    .update(stringToSign, 'utf8')
-    .digest('hex');
+  const signature = hmacSha256(kSigning, stringToSign).toString('hex');
 
-  const authorization = `${algorithm} Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-  const url = `${protocol}//${host}${canonicalUri}`;
-
-  const res = await fetch(url, {
+  const res = await fetch(`${protocol}//${host}${canonicalUri}`, {
     method: 'PUT',
     headers: {
       'Content-Type': contentType,
-      Host: host,
       'x-amz-content-sha256': payloadHash,
       'x-amz-date': amzDate,
-      Authorization: authorization,
+      Authorization: `${algorithm} Credential=${config.accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
     },
     body,
+    signal: AbortSignal.timeout(PUT_TIMEOUT_MS),
   });
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    throw new Error(`S3/R2 PUT failed (${res.status}) for ${canonicalUri}: ${errText}`);
+    throw new Error(`R2 PUT failed (${res.status}) for ${canonicalUri}: ${errText.slice(0, 500)}`);
   }
-
-  return true;
 }
 
-// Save files to Cloudflare R2 and local disk.
+// ---------------------------------------------------------------------------
+// Local disk
+// ---------------------------------------------------------------------------
+
+// Write to a temp file then rename, so readers never see a half-written file.
+async function writeFileAtomic(filePath: string, content: string): Promise<void> {
+  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await fs.writeFile(tmpPath, content, 'utf-8');
+    await fs.rename(tmpPath, filePath);
+  } catch (err) {
+    await fs.rm(tmpPath, { force: true }).catch(() => { });
+    throw err;
+  }
+}
+
+async function writeLocalFiles(
+  folderName: string,
+  llmsTxt: string,
+  llmsFullTxt: string
+): Promise<{ llmsTxtPath: string; llmsFullTxtPath: string }> {
+  const baseDir = path.resolve(process.env.LOCAL_STORAGE_DIR || './data/storage');
+  const targetDir = path.join(baseDir, folderName);
+  const llmsTxtPath = path.join(targetDir, 'llms.txt');
+  const llmsFullTxtPath = path.join(targetDir, 'llms-full.txt');
+
+  await fs.mkdir(targetDir, { recursive: true });
+  await Promise.all([
+    writeFileAtomic(llmsTxtPath, llmsTxt),
+    writeFileAtomic(llmsFullTxtPath, llmsFullTxt),
+  ]);
+
+  return { llmsTxtPath, llmsFullTxtPath };
+}
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+// Save the generated files to the configured storage provider.
+// With STORAGE_PROVIDER=r2, any configuration or upload failure throws; there
+// is no silent fallback to local disk.
 export async function uploadToStorage(
   websiteUrl: string,
   llmsTxt: string,
   llmsFullTxt: string
 ): Promise<UploadResult> {
-  // Validate file contents and adherence to llms.txt standard before writing to storage.
+  // Validate contents against the llms.txt standard before writing anywhere.
   assertValidLlmsFiles(llmsTxt, llmsFullTxt);
 
-  const provider = process.env.STORAGE_PROVIDER || 'local';
+  // Fail fast on misconfiguration, before any writes.
+  const config = resolveStorageConfig();
   const folderName = cleanUrlForFolder(websiteUrl);
 
-  // Always write local mirror on disk.
-  const baseDir = path.resolve(process.env.LOCAL_STORAGE_DIR || './data/storage');
-  const targetDir = path.join(baseDir, folderName);
-
-  await fs.mkdir(targetDir, { recursive: true });
-
-  const llmsTxtPath = path.join(targetDir, 'llms.txt');
-  const llmsFullTxtPath = path.join(targetDir, 'llms-full.txt');
-
-  await fs.writeFile(llmsTxtPath, llmsTxt, 'utf-8');
-  await fs.writeFile(llmsFullTxtPath, llmsFullTxt, 'utf-8');
-
-  // Upload to Cloudflare R2 / MinIO via S3 SigV4 PUT if provider is r2/s3/minio or S3_ENDPOINT is set.
-  const endpoint = process.env.S3_ENDPOINT || process.env.R2_ENDPOINT;
-  const isS3Provider = provider === 'r2' || provider === 's3' || provider === 'minio' || Boolean(endpoint);
-
-  if (isS3Provider) {
-    const bucket = process.env.R2_LLMS_TXT_BUCKET || process.env.S3_BUCKET || 'llmstxt-files-bucket';
-    const txtKey = `${folderName}/llms.txt`;
-    const fullTxtKey = `${folderName}/llms-full.txt`;
-
-    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || 'local';
-    const accessKeyId =
-      process.env.R2_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID || (endpoint ? 'minioadmin' : undefined);
-    const secretAccessKey =
-      process.env.R2_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY || (endpoint ? 'minioadmin' : undefined);
-
-    if (accessKeyId && secretAccessKey) {
-      try {
-        await putObjectToR2({
-          accountId,
-          accessKeyId,
-          secretAccessKey,
-          bucket,
-          key: txtKey,
-          body: llmsTxt,
-          endpoint,
-        });
-        await putObjectToR2({
-          accountId,
-          accessKeyId,
-          secretAccessKey,
-          bucket,
-          key: fullTxtKey,
-          body: llmsFullTxt,
-          endpoint,
-        });
-
-        const uriScheme = endpoint ? 's3' : 'r2';
-        return {
-          llmsTxtUri: `${uriScheme}://${bucket}/${txtKey}`,
-          llmsFullTxtUri: `${uriScheme}://${bucket}/${fullTxtKey}`,
-        };
-      } catch (err) {
-        // If S3/R2 upload fails in environments where bucket/network isn't reachable, fall back to local/API storage path.
-        if (process.env.NODE_ENV !== 'test') {
-          console.warn(`[StorageUpload] R2 upload fallback to local storage: ${err}`);
-        }
-      }
-    }
+  if (config.kind === 'local') {
+    const { llmsTxtPath, llmsFullTxtPath } = await writeLocalFiles(folderName, llmsTxt, llmsFullTxt);
+    return {
+      llmsTxtUri: pathToFileURL(llmsTxtPath).href,
+      llmsFullTxtUri: pathToFileURL(llmsFullTxtPath).href,
+    };
   }
 
+  const txtKey = `${folderName}/llms.txt`;
+  const fullTxtKey = `${folderName}/llms-full.txt`;
+
+  // Upload the full file first and the index last, so a partial failure never
+  // leaves an llms.txt pointing at content that was not uploaded.
+  await putObject(config, fullTxtKey, llmsFullTxt);
+  await putObject(config, txtKey, llmsTxt);
+
+  // The local mirror is a convenience when R2 is the source of truth.
+  await writeLocalFiles(folderName, llmsTxt, llmsFullTxt).catch((err) =>
+    logWarn('[StorageUpload] Local mirror write failed (R2 upload succeeded):', err)
+  );
+
   return {
-    llmsTxtUri: `file://${llmsTxtPath}`,
-    llmsFullTxtUri: `file://${llmsFullTxtPath}`,
+    llmsTxtUri: `r2://${config.bucket}/${txtKey}`,
+    llmsFullTxtUri: `r2://${config.bucket}/${fullTxtKey}`,
   };
 }
 
-// Cloudflare R2 upload alias.
+/** @deprecated Misleading name: this also handles local storage. Use `uploadToStorage`. */
 export const uploadToR2 = uploadToStorage;

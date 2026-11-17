@@ -126,8 +126,16 @@ export type CadenceStatus = 'idle' | 'queued' | 'processing';
 // websites llm files are generated
 export enum SiteCategory {
   API_DOCS = 'api_docs',
+  TECHNICAL_DOCS = 'technical_docs',
+  STANDARDS_SPECIFICATION = 'standards_specification',
+  NEWS_MEDIA = 'news_media',
+  GOVERNMENT_PORTAL = 'government_portal',
+  SAAS_APPLICATION = 'saas_application',
+  SEARCH_ENGINE = 'search_engine',
   BLOG = 'blog',
+  BLOG_ESSAYS = 'blog_essays',
   MARKETING = 'marketing',
+  COMMUNITY_PLATFORM = 'community_platform',
 }
 
 // Record of a site's update cadence and schedule.
