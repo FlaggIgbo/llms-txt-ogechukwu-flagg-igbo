@@ -27,16 +27,26 @@ cp .env.example .env
 
 Key environment variables:
 - `DATABASE_URL`: PostgreSQL connection string (defaults to local Docker instance).
-- `STORAGE_PROVIDER`: `local` for filesystem storage during development, or `r2` for Cloudflare R2 in production.
+- `STORAGE_PROVIDER`: `minio` for local S3-compatible storage via Docker, or `r2` for Cloudflare R2 in production.
 - `GEMINI_API_KEY`: API key for AI categorization and link summarization.
 - `SENTRY_DSN` / `VITE_SENTRY_DSN`: Optional error tracking.
 
 ### 3. Start Local Infrastructure
 
-Start the local PostgreSQL database:
+Start the local PostgreSQL and MinIO S3-compatible storage cluster:
 
 ```bash
 npm run infra:up
+```
+
+Infrastructure services started:
+- **PostgreSQL**: `localhost:5432` (`postgres:postgres`, DB: `llmstxt_directory`)
+- **MinIO S3 API**: `http://localhost:9000`
+- **MinIO Web Console**: `http://localhost:9001` (Username: `minioadmin` / Password: `minioadmin`)
+
+*(Optional)* Sync existing generated files from production Cloudflare R2 into your local MinIO:
+```bash
+npm run infra:sync-r2
 ```
 
 Apply database migrations:

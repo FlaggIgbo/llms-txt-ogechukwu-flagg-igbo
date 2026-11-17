@@ -99,14 +99,18 @@ export async function handleGetEntries(
       entries = entries.filter((entry) => entry.status === EntryStatus.COMPLETED);
     } else if (statusParam.toLowerCase() === 'pending' || statusParam.toLowerCase() === 'updating') {
       // Updates page: return entries in progress (PENDING, PROCESSING),
-      // and user-submitted entries that failed (to show an error next to them).
-      // Entries updated from the cron scheduler that failed are excluded.
+      // and recent user-submitted entries that failed within the last 15 minutes.
+      // Stale failed entries older than 15 minutes and cron scheduler failures are excluded.
+      const now = Date.now();
+      const MAX_FAILED_AGE_MS = 15 * 60 * 1000;
+
       entries = entries.filter((entry) => {
         if (entry.status === EntryStatus.PENDING || entry.status === EntryStatus.PROCESSING) {
           return true;
         }
         if (entry.status === EntryStatus.FAILED && !entry.is_scheduled_update) {
-          return true;
+          const entryTime = new Date(entry.updated_at || entry.created_at).getTime();
+          return now - entryTime <= MAX_FAILED_AGE_MS;
         }
         return false;
       });

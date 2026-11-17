@@ -112,6 +112,14 @@ export const RECOVER_STUCK_PROCESSING_SQL = `
     AND a.website_url = b.website_url
     AND a.status IN ('PENDING', 'PROCESSING')
     AND b.status IN ('PENDING', 'PROCESSING');
+  DELETE FROM site_entries
+  WHERE status = 'FAILED'
+    AND (
+      created_at < NOW() - INTERVAL '15 minutes'
+      OR error_code = 'DUPLICATE_URL'
+      OR website_name ILIKE '%Test%'
+      OR website_url IN (SELECT website_url FROM site_entries WHERE status = 'COMPLETED')
+    );
   UPDATE site_entries SET status = 'PENDING', is_scheduled_update = FALSE, updated_at = NOW() WHERE status = 'PROCESSING';
   UPDATE background_jobs SET status = 'QUEUED', updated_at = NOW() WHERE status = 'PROCESSING';
   INSERT INTO background_jobs (entry_id, website_url, is_scheduled_update, status, attempts, max_attempts, created_at, updated_at)
